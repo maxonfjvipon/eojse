@@ -1,0 +1,12 @@
+# Program
+[] > program
+  [n] > fibonacci
+    if. > @
+      2.gt n
+      n
+      plus.
+        ^.fibonacci
+          n.minus 1
+        ^.fibonacci
+          n.minus 2
+  fibonacci 4 > @

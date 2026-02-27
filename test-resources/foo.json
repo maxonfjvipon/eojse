@@ -1,0 +1,10 @@
+{
+  "program": [
+    "# Program.",
+    "[] > program",
+    "  y > [y] > foo",
+    "  35 > x",
+    "  foo (foo x) > @"
+  ],
+  "expected": "35"
+}
