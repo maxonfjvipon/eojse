@@ -72,7 +72,22 @@ const atoms = {
     stack[res].from_atom = true
 
     return res
-  }
+  },
+  'L_number_gt': (self) => {
+    push(dispatch(`${self}.${RHO}`, self, RHO))
+    const left = bytesOf.bytes(dataize(morph(head(), self, true))).asNumber()
+
+    push(dispatch(`${self}.x`, self, 'x'))
+    const right = bytesOf.bytes(dataize(morph(head(), self, true))).asNumber()
+
+    const bool = left > right ? 'true' : 'false'
+    push(dispatch('Q.' + bool, 0, bool))
+    const res = morph(head(), self, true)
+
+    stack[res].from_atom = true
+
+    return res
+  },
 }
 
 const print_object = (index) => {
