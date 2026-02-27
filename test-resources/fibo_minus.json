@@ -1,0 +1,15 @@
+{
+  "program": [
+    "# Program.",
+    "[] > program",
+    "  [x] > fibo",
+    "    if. > @",
+    "      2.gt x",
+    "      x",
+    "      plus.",
+    "        fibo (x.minus 1)",
+    "        fibo (x.minus 2)",
+    "  fibo 8 > @"
+  ],
+  "expected": "21"
+}

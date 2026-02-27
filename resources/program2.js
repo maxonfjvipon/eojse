@@ -88,6 +88,32 @@ const atoms = {
 
     return res
   },
+  'L_number_times': (self) => {
+    push(dispatch(`${self}.${RHO}`, self, RHO))
+    const left = bytesOf.bytes(dataize(morph(head(), self, true))).asNumber()
+
+    push(dispatch(`${self}.x`, self, 'x'))
+    const right = bytesOf.bytes(dataize(morph(head(), self, true))).asNumber()
+
+    push(dispatch('Q.number', 0, 'number'))
+    const num = morph(head(), self, true)
+
+    push(dispatch('Q.bytes', 0, 'bytes'))
+    const bts = morph(head(), self, true)
+
+    push(formation('times res', {[DELTA]: attr(bytesOf.number(left * right).asBytes())}))
+    const data = morph(head(), self, true)
+
+    push(application(`${bts}(0: ${data})`, bts, 0, data))
+    const _bts = morph(head(), self, true)
+
+    push(application(`${num}(0: ${_bts})`, num, 0, _bts))
+    const res = morph(head(), self, true)
+
+    stack[res].from_atom = true
+
+    return res
+  },
 }
 
 const print_object = (index) => {

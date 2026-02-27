@@ -59,11 +59,12 @@ if (fs.existsSync(temp)) {
 fs.mkdirSync(temp, {recursive: true})
 
 const programs = [
-  // 'simple',
-  // 'foo',
-  // 'eleven',
-  // 'rec',
-  "fibo"
+  'simple',
+  'foo',
+  'eleven',
+  'rec',
+  "fibo",
+  "fibo_minus"
 ]
 
 describe('run programs', function () {
