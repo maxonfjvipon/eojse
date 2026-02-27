@@ -58,11 +58,15 @@ if (fs.existsSync(temp)) {
 
 fs.mkdirSync(temp, {recursive: true})
 
-const programs = ['simple', 'foo']
+const programs = [
+  'simple',
+  'foo',
+  'eleven'
+]
 
 describe('run programs', function () {
   programs.forEach((name) => {
-    it(`should run ${name} program`, function (done) {
+    it(`should run '${name}' program`, function (done) {
       this.timeout(0)
       const dir = path.resolve(temp, name)
       if (fs.existsSync(dir)) {

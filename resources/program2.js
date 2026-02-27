@@ -1,4 +1,4 @@
-const bytesOf = require('./bytes.js');
+const bytesOf = require('./bytes.js')
 
 const stack = []
 
@@ -45,6 +45,35 @@ const XI = 'ξ'
 const LAMBDA = 'λ'
 
 const REMOVE_UNNECESSARY = true
+
+const atoms = {
+  'L_number_plus': (self) => {
+    push(dispatch(`${self}.${RHO}`, self, RHO))
+    const left = bytesOf.bytes(dataize(morph(head(), self, true))).asNumber()
+
+    push(dispatch(`${self}.x`, self, 'x'))
+    const right = bytesOf.bytes(dataize(morph(head(), self, true))).asNumber()
+
+    push(dispatch('Q.number', 0, 'number'))
+    const num = morph(head(), self, true)
+
+    push(dispatch('Q.bytes', 0, 'bytes'))
+    const bts = morph(head(), self, true)
+
+    push(formation('plus res', {[DELTA]: attr(bytesOf.number(left + right).asBytes())}))
+    const data = morph(head(), self, true)
+
+    push(application(`${bts}(0: ${data})`, bts, 0, data))
+    const _bts = morph(head(), self, true)
+
+    push(application(`${num}(0: ${_bts})`, num, 0, _bts))
+    const res = morph(head(), self, true)
+
+    stack[res].from_atom = true
+
+    return res
+  }
+}
 
 const print_object = (index) => {
   const obj = stack[index]
@@ -104,12 +133,6 @@ const print_stack = () => {
   })
 }
 
-const atoms = {
-  'L_number_plus': (self) => {
-
-  }
-}
-
 const exec = (op) => {
   let res, tgt
   switch (op.type) {
@@ -161,7 +184,9 @@ const morph = (index, context, remove) => {
       res = index
       break
     case DISPATCH:
-      if (clear) { pop() }
+      if (clear) {
+        pop()
+      }
 
       if (obj.target === -1) {
         tgt_i = context
@@ -200,7 +225,7 @@ const morph = (index, context, remove) => {
           if (!Object.hasOwn(atoms, atom)) {
             throw new Error(`Atom ${atom} does not exist`)
           }
-          const atom_res_i = morph(atoms[atom](tgt_i), tgt_i)
+          const atom_res_i = morph(atoms[atom](tgt_i, dataize, morph), tgt_i)
           push(dispatch(`${atom_res_i}.${obj.attr}`, atom_res_i, obj.attr))
           res = morph(head(), atom_res_i, true)
         } else {
@@ -209,7 +234,9 @@ const morph = (index, context, remove) => {
       }
       break
     case APPLICATION:
-      if (clear) { pop() }
+      if (clear) {
+        pop()
+      }
 
       tgt_i = morph(obj.target, context)
 
@@ -243,7 +270,7 @@ const dataize = (index) => {
         if (!Object.hasOwn(atoms, atom)) {
           throw new Error(`Atom ${atom} does not exist`)
         }
-        data = dataize(morph(atoms[atom](index), index))
+        data = dataize(morph(atoms[atom](index, dataize, morph), index))
       } else {
         throw new Error(`Can't dataize object ${index}, no ${DELTA}, no ${PHI}, no ${LAMBDA}`)
       }
