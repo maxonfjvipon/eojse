@@ -45,6 +45,7 @@ const XI = 'ξ'
 const LAMBDA = 'λ'
 
 const REMOVE_UNNECESSARY = true
+const USE_CACHE = true
 
 const atoms = {
   'L_number_plus': (self) => {
@@ -81,6 +82,7 @@ const atoms = {
     const right = bytesOf.bytes(dataize(morph(head(), self, true))).asNumber()
 
     const bool = left > right ? 'true' : 'false'
+
     push(dispatch('Q.' + bool, 0, bool))
     const res = morph(head(), self, true)
 
@@ -167,7 +169,6 @@ const print_object = (index) => {
   return res + ' // ' + obj.name
 }
 
-
 const print_stack = () => {
   stack.forEach((_, idx) => {
     console.log(print_object(idx))
@@ -240,15 +241,24 @@ const morph = (index, context, remove) => {
         res = context
       } else {
         if (Object.hasOwn(tgt, obj.attr)) {
-          at = tgt[obj.attr]
-
-          let ctx
-          if (at.xi != null) {
-            ctx = at.xi
+          let at_i
+          if (USE_CACHE && tgt[obj.attr].cache != null) {
+            at_i = tgt[obj.attr].cache
           } else {
-            ctx = tgt_i
+            at = tgt[obj.attr]
+
+            let ctx
+            if (at.xi != null) {
+              ctx = at.xi
+            } else {
+              ctx = tgt_i
+            }
+            at_i = morph(at.value, ctx)
+
+            if (USE_CACHE && tgt[obj.attr].cache == null) {
+              tgt[obj.attr].cache = at_i
+            }
           }
-          const at_i = morph(at.value, ctx)
 
           if (at_i !== 0 && !Object.hasOwn(stack[at_i].target, RHO)) {
             res = exec(copy(at_i))
