@@ -1,16 +1,28 @@
 const bytesOf = require('./bytes.js')
 
-const stack = []
+const stack = {}
 
 const push = (obj) => {
-  stack.push(obj)
+  if (stack_size() === 0) {
+    stack[0] = obj
+  } else {
+    stack[head() + 1] = obj
+  }
 }
 
 const pop = () => {
-  stack.pop()
+  delete stack[head()]
 }
 
-const head = () => stack.length - 1
+const stack_size = () => Object.keys(stack).length;
+
+const head = () => {
+  const keys = Object.keys(stack).map(Number)
+  if (keys.length === 0) {
+    throw new Error("Can't get head from empty stack")
+  }
+  return keys[keys.length - 1]
+}
 
 const FORMATION = "FRM", DISPATCH = "DSP", APPLICATION = "APP", COPY = "CPY", SET = "SET"
 
@@ -171,7 +183,7 @@ const print_object = (index) => {
 }
 
 const print_stack = () => {
-  stack.forEach((_, idx) => {
+  Object.keys(stack).map(Number).forEach((idx) => {
     console.log(print_object(idx))
   })
 }
@@ -352,7 +364,7 @@ try {
   const res = bytesOf.bytes(dataize(0)).asNumber()
   print_stack()
   console.log(`data: ${res}`)
-  console.log(`total: ${stack.length}`)
+  console.log(`total: ${stack_size()}`)
 } catch (e) {
   console.log(e)
   print_stack()
