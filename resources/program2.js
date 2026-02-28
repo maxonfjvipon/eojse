@@ -260,7 +260,7 @@ const morph = (index, context, remove) => {
             }
           }
 
-          if (at_i !== 0 && !Object.hasOwn(stack[at_i].target, RHO)) {
+          if (at_i !== 0 && obj.attr !== RHO && !Object.hasOwn(stack[at_i].target, RHO)) {
             res = exec(copy(at_i))
             res = exec(set(res, RHO, attr(tgt_i)))
           } else {
