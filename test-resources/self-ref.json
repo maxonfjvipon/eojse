@@ -1,0 +1,14 @@
+{
+  "program": [
+    "# Program.",
+    "[] > program",
+    "  [x] > rec",
+    "    (x.plus 1).xi > next",
+    "    if. > @",
+    "      4.gt x",
+    "      rec next",
+    "      x",
+    "  rec 1 > @"
+  ],
+  "expected": "4"
+}

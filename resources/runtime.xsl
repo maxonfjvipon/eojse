@@ -11,6 +11,7 @@
       </o>
       <o name="number">
         <o base="∅" name="as-bytes"/>
+        <o base="ξ" name="xi"/>
         <o base="ξ.as-bytes" name="φ"/>
         <o name="plus">
           <o base="∅" name="x"/>

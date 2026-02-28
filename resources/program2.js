@@ -170,7 +170,7 @@ const print_object = (index) => {
       } else if (o[at].xi == null && o[at].cache == null) {
         r += o[at].value
       } else if (o[at].value === o[at].cache) {
-        r += o[at].value
+        r += `${o[at].value}!`
       } else {
         r += '{' + [o[at].value, o[at].xi, o[at].cache].join(', ') + '}'
       }
@@ -428,7 +428,7 @@ try {
   console.log(`data: ${res}`)
   console.log(`total: ${stack_size()}`)
   console.log(`in runtime: ${stack_size() - before}`)
-  console.log(`stay: ${Object.keys(stack).filter((key) => stack[key].stay).length}`)
+  console.log(`to delete: ${Object.keys(stack).filter((key) => key > before && !stack[key].stay).length}`)
 } catch (e) {
   console.log(e)
   print_stack()

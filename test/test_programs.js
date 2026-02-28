@@ -64,6 +64,7 @@ const programs = [
   // 'eleven',
   'rec',
   "fibo",
+  "self-ref",
   // "fibo_minus"
 ]
 
