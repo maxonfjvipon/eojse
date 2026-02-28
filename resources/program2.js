@@ -24,6 +24,25 @@ const head = () => {
   return keys[keys.length - 1]
 }
 
+const scope = []
+
+const start_scope = (start, value, attr) => {
+  const add = USE_SCOPES && start && (scope.length === 0 || value > scope[scope.length - 1])
+  if (add) {
+    console.log('add scope', value)
+    scope.push(value)
+    mark_objects()
+  }
+  return add
+}
+
+const end_scope = (end) => {
+  if (USE_SCOPES && end) {
+    console.log('pop scope', scope[scope.length - 1])
+    scope.pop()
+  }
+}
+
 const FORMATION = "FRM", DISPATCH = "DSP", APPLICATION = "APP", COPY = "CPY", SET = "SET"
 
 const attr = (value, xi = null, cache = null) => ({value, xi, cache})
@@ -59,6 +78,9 @@ const LAMBDA = 'λ'
 const REMOVE_UNNECESSARY = true
 const USE_CACHE = true
 const COPY_ON_APPLICATION = false
+const USE_SCOPES = true
+const REMOVE_MARKED = false
+const WITH_SCOPE_DEFAULT = false
 
 const atoms = {
   'L_number_plus': (self) => {
@@ -162,8 +184,8 @@ const print_object = (index) => {
         `${index}: ${form(obj.target)}`,
         // `${idx}: ${JSON.stringify(obj.target)}`,
         Object.hasOwn(obj.target, DELTA) ? ' (DATA ' + bytesOf.bytes(obj.target[DELTA].value).verbose() + ')' : '',
+        Object.hasOwn(obj, 'stay') ? ' (STAY)' : '',
         Object.hasOwn(obj, 'from_atom') ? ' (FROM ATOM)' : '',
-        // Object.hasOwn(obj, 'stay') ? ' (STAY)' : ''
       ].join('')
       break
     case DISPATCH:
@@ -185,6 +207,38 @@ const print_object = (index) => {
 const print_stack = () => {
   Object.keys(stack).map(Number).forEach((idx) => {
     console.log(print_object(idx))
+  })
+}
+
+const mark_objects = () => {
+  if (scope.length > 1) {
+    const pre_last = scope[scope.length - 2]
+    const last = scope[scope.length - 1]
+    mark_rec(pre_last, pre_last, true)
+    mark_rec(last, last, false)
+
+    if (REMOVE_MARKED) {
+      for (let i = pre_last + 1; i < last; ++i) {
+        if (!!stack[i] && !stack[i].stay) {
+          delete stack[i]
+        }
+      }
+    }
+  }
+}
+
+const mark_rec = (index, border, more) => {
+  stack[index].stay = true
+  const tgt = stack[index].target
+  Object.keys(tgt).forEach((at) => {
+    const atr = tgt[at]
+    if (!!atr.cache && !stack[atr.cache].stay) {
+      if (more && atr.cache > border) {
+        mark_rec(atr.cache, border, more)
+      } else if (!more && atr.cache < border) {
+        mark_rec(atr.cache, border, more)
+      }
+    }
   })
 }
 
@@ -330,9 +384,9 @@ const morph = (index, context, remove) => {
   return res
 }
 
-const dataize = (index) => {
+const dataize = (index, with_scope = WITH_SCOPE_DEFAULT) => {
   const obj = stack[index]
-  let data
+  let data, started = false
   switch (obj.type) {
     case FORMATION:
       if (Object.hasOwn(obj.target, DELTA)) {
@@ -340,31 +394,41 @@ const dataize = (index) => {
       } else if (Object.hasOwn(obj.target, PHI)) {
         push(dispatch(`${obj.name}.${PHI}`, index, PHI))
         const phi_i = morph(head(), index, true)
-        data = dataize(phi_i)
+        started = start_scope(with_scope, phi_i, PHI)
+        data = dataize(phi_i, with_scope)
       } else if (Object.hasOwn(obj.target, LAMBDA)) {
         const atom = obj.target[LAMBDA].value
         if (!Object.hasOwn(atoms, atom)) {
           throw new Error(`Atom ${atom} does not exist`)
         }
-        data = dataize(morph(atoms[atom](index, dataize, morph), index))
+        const atom_res_i = morph(atoms[atom](index), index)
+        started = start_scope(with_scope, atom_res_i, LAMBDA)
+        data = dataize(atom_res_i, with_scope)
       } else {
         throw new Error(`Can't dataize object ${index}, no ${DELTA}, no ${PHI}, no ${LAMBDA}`)
       }
       break
     default:
-      data = dataize(morph(index, index, true))
+      const op_i = morph(index, index, true)
+      // started = start_scope(with_scope, op_i, ?) // todo
+      data = dataize(op_i, with_scope)
       break
   }
+  end_scope(started)
   return data
 }
 
 // OBJECTS
 
+const before = stack_size()
+
 try {
-  const res = bytesOf.bytes(dataize(0)).asNumber()
+  const res = bytesOf.bytes(dataize(0, true)).asNumber()
   print_stack()
   console.log(`data: ${res}`)
   console.log(`total: ${stack_size()}`)
+  console.log(`in runtime: ${stack_size() - before}`)
+  console.log(`stay: ${Object.keys(stack).filter((key) => stack[key].stay).length}`)
 } catch (e) {
   console.log(e)
   print_stack()
