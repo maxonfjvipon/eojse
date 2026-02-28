@@ -46,6 +46,7 @@ const LAMBDA = 'λ'
 
 const REMOVE_UNNECESSARY = true
 const USE_CACHE = true
+const COPY_ON_APPLICATION = false
 
 const atoms = {
   'L_number_plus': (self) => {
@@ -262,7 +263,11 @@ const morph = (index, context, remove) => {
 
           if (at_i !== 0 && obj.attr !== RHO && !Object.hasOwn(stack[at_i].target, RHO)) {
             res = exec(copy(at_i))
-            res = exec(set(res, RHO, attr(tgt_i)))
+            if (USE_CACHE) {
+              res = exec(set(res, RHO, attr(tgt_i, null, tgt_i)))
+            } else {
+              res = exec(set(res, RHO, attr(tgt_i)))
+            }
           } else {
             res = at_i
           }
@@ -297,6 +302,14 @@ const morph = (index, context, remove) => {
         at = attr(obj.value, context)
       } else {
         at = attr(obj.value)
+      }
+
+      if (COPY_ON_APPLICATION) {
+        tgt_i = exec(copy(tgt_i))
+      }
+
+      if (USE_CACHE && stack[at.value].type === FORMATION) {
+        at.cache = at.value
       }
 
       res = exec(set(tgt_i, obj.attr, at))
