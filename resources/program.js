@@ -1,6 +1,21 @@
 const bytesOf = require('./bytes.js')
 
-let program_size
+const PHI = 'φ'
+const DELTA = 'Δ'
+const RHO = 'ρ'
+const LAMBDA = 'λ'
+
+const REMOVE_UNNECESSARY = true
+const USE_CACHE = true
+const COPY_ON_APPLICATION = false
+const USE_D_SCOPES = true
+const REMOVE_D_MARKED = true
+const WITH_SCOPE_DEFAULT = false
+const HIDE_XI = false
+
+const FORMATION = "FRM", DISPATCH = "DSP", APPLICATION = "APP", COPY = "CPY", SET = "SET"
+
+let program_size, max_allocated, total_created, total_deleted = 0
 
 const stack = {}
 
@@ -10,10 +25,16 @@ const push = (obj) => {
   } else {
     stack[head() + 1] = obj
   }
+  ++total_created
+  if (stack_size() > max_allocated) {
+    max_allocated = stack_size()
+  }
 }
 
-const pop = () => {
-  delete stack[head()]
+const pop = (idx = null) => {
+  idx = idx || head()
+  delete stack[idx]
+  ++total_deleted
 }
 
 const stack_size = () => Object.keys(stack).length;
@@ -26,24 +47,37 @@ const head = () => {
   return keys[keys.length - 1]
 }
 
-const scope = []
+const d_scope = []
 
-const start_scope = (start, value) => {
-  const add = USE_SCOPES && start && (scope.length === 0 || value > scope[scope.length - 1])
+// limit scope for atoms
+// unlimited scope for global dataization
+const start_d_scope = (start, value) => {
+  const add = USE_D_SCOPES && start && (d_scope.length === 0 || value > d_scope[d_scope.length - 1])
   if (add) {
     // console.log('add scope', value)
-    scope.push(value)
-    mark_objects()
+    d_scope.push(value)
+    if (value - program_size > 1) {
+      mark_rec(value)
+      if (REMOVE_D_MARKED) {
+        for (let i = program_size; i <= value; ++i) {
+          if (!!stack[i]) {
+            if (!stack[i].stay) {
+              pop(i)
+            } else {
+              stack[i].stay = null
+            }
+          }
+        }
+      }
+    }
   }
   return add
 }
 
-const end_scope = (end) => {
-  if (USE_SCOPES && end) {
-
-    if (REMOVE_MARKED) {
-      const until = scope.length > 1 ? scope[scope.length - 2] : program_size - 1
-
+const end_d_scope = (end) => {
+  if (USE_D_SCOPES && end) {
+    if (REMOVE_D_MARKED) {
+      const until = d_scope.length > 1 ? d_scope[d_scope.length - 2] : program_size - 1
       while (true) {
         if (head() > until) {
           pop()
@@ -52,13 +86,10 @@ const end_scope = (end) => {
         }
       }
     }
-
     // console.log('pop scope', scope[scope.length - 1])
-    scope.pop()
+    d_scope.pop()
   }
 }
-
-const FORMATION = "FRM", DISPATCH = "DSP", APPLICATION = "APP", COPY = "CPY", SET = "SET"
 
 const attr = (value, xi = null, cache = null) => ({value, xi, cache})
 
@@ -83,19 +114,6 @@ const operation = (type, target, attr = null, value = null) => ({type, target, a
 const copy = (target) => operation(COPY, target)
 
 const set = (target, attr, value) => operation(SET, target, attr, value)
-
-const PHI = 'φ'
-const DELTA = 'Δ'
-const RHO = 'ρ'
-const LAMBDA = 'λ'
-
-const REMOVE_UNNECESSARY = true
-const USE_CACHE = true
-const COPY_ON_APPLICATION = false
-const USE_SCOPES = true
-const REMOVE_MARKED = true
-const WITH_SCOPE_DEFAULT = false
-const HIDE_XI = false
 
 const atoms = {
   'L_number_plus': (self) => {
@@ -225,25 +243,6 @@ const print_stack = () => {
   })
 }
 
-const mark_objects = () => {
-  const last = scope[scope.length - 1]
-
-  if (last - program_size > 1) {
-    mark_rec(last)
-    if (REMOVE_MARKED) {
-      for (let i = program_size; i <= last; ++i) {
-        if (!!stack[i]) {
-          if (!stack[i].stay) {
-            delete stack[i]
-          } else {
-            stack[i].stay = null
-          }
-        }
-      }
-    }
-  }
-}
-
 const mark_rec = (index) => {
   stack[index].stay = true
   const tgt = stack[index].target
@@ -255,7 +254,7 @@ const mark_rec = (index) => {
     } else if (atr.cache != null) {
       ref = atr.cache
     }
-    if (ref != null && ref >= program_size && ref < scope[scope.length - 1] && !stack[ref].stay) {
+    if (ref != null && ref >= program_size && ref < d_scope[d_scope.length - 1] && !stack[ref].stay) {
       mark_rec(ref)
     }
   })
@@ -366,7 +365,7 @@ const morph = (index, context, remove) => {
           if (!Object.hasOwn(atoms, atom)) {
             throw new Error(`Atom ${atom} does not exist`)
           }
-          const atom_res_i = morph(atoms[atom](tgt_i, dataize, morph), tgt_i)
+          const atom_res_i = morph(atoms[atom](tgt_i), tgt_i)
           push(dispatch(`${atom_res_i}.${obj.attr}`, atom_res_i, obj.attr))
           res = morph(head(), atom_res_i, true)
         } else {
@@ -413,7 +412,7 @@ const dataize = (index, with_scope = WITH_SCOPE_DEFAULT) => {
       } else if (Object.hasOwn(obj.target, PHI)) {
         push(dispatch(`${obj.name}.${PHI}`, index, PHI))
         const phi_i = morph(head(), index, true)
-        started = start_scope(with_scope, phi_i)
+        started = start_d_scope(with_scope, phi_i)
         data = dataize(phi_i, with_scope)
       } else if (Object.hasOwn(obj.target, LAMBDA)) {
         const atom = obj.target[LAMBDA].value
@@ -431,21 +430,26 @@ const dataize = (index, with_scope = WITH_SCOPE_DEFAULT) => {
       data = dataize(op_i, with_scope)
       break
   }
-  end_scope(started)
+  end_d_scope(started)
   return data
 }
 
 // OBJECTS
 
 program_size = stack_size()
+max_allocated = stack_size()
+total_created = stack_size()
 
 try {
   const res = bytesOf.bytes(dataize(0, true)).asNumber()
   print_stack()
   console.log(`data: ${res}`)
-  console.log(`total: ${stack_size()}`)
-  console.log(`in runtime: ${stack_size() - program_size}`)
-  console.log(`to delete: ${Object.keys(stack).filter((key) => key > program_size && !stack[key].stay).length}`)
+  console.log(`original program size: ${program_size}`)
+  console.log(`total created: ${total_created}`)
+  console.log(`total created without program: ${total_created - program_size}`)
+  console.log(`total deleted: ${total_deleted}`)
+  console.log(`max depth: ${max_allocated}`)
+  console.log(`max depth without program: ${max_allocated - program_size}`)
 } catch (e) {
   console.log(e)
   print_stack()
