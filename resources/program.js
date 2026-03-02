@@ -1,5 +1,7 @@
 const bytesOf = require('./bytes.js')
 
+let program_size
+
 const stack = {}
 
 const push = (obj) => {
@@ -26,10 +28,10 @@ const head = () => {
 
 const scope = []
 
-const start_scope = (start, value, attr) => {
+const start_scope = (start, value) => {
   const add = USE_SCOPES && start && (scope.length === 0 || value > scope[scope.length - 1])
   if (add) {
-    console.log('add scope', value)
+    // console.log('add scope', value)
     scope.push(value)
     mark_objects()
   }
@@ -38,7 +40,20 @@ const start_scope = (start, value, attr) => {
 
 const end_scope = (end) => {
   if (USE_SCOPES && end) {
-    console.log('pop scope', scope[scope.length - 1])
+
+    if (REMOVE_MARKED) {
+      const until = scope.length > 1 ? scope[scope.length - 2] : program_size - 1
+
+      while (true) {
+        if (head() > until) {
+          pop()
+        } else {
+          break
+        }
+      }
+    }
+
+    // console.log('pop scope', scope[scope.length - 1])
     scope.pop()
   }
 }
@@ -72,14 +87,13 @@ const set = (target, attr, value) => operation(SET, target, attr, value)
 const PHI = 'φ'
 const DELTA = 'Δ'
 const RHO = 'ρ'
-const XI = 'ξ'
 const LAMBDA = 'λ'
 
 const REMOVE_UNNECESSARY = true
 const USE_CACHE = true
 const COPY_ON_APPLICATION = false
 const USE_SCOPES = true
-const REMOVE_MARKED = false
+const REMOVE_MARKED = true
 const WITH_SCOPE_DEFAULT = false
 const HIDE_XI = false
 
@@ -185,7 +199,7 @@ const print_object = (index) => {
         `${index}: ${form(obj.target)}`,
         // `${idx}: ${JSON.stringify(obj.target)}`,
         Object.hasOwn(obj.target, DELTA) ? ' (DATA ' + bytesOf.bytes(obj.target[DELTA].value).verbose() + ')' : '',
-        Object.hasOwn(obj, 'stay') ? ' (STAY)' : '',
+        !!obj.stay ? ' (STAY)' : '',
         Object.hasOwn(obj, 'from_atom') ? ' (FROM ATOM)' : '',
       ].join('')
       break
@@ -212,33 +226,37 @@ const print_stack = () => {
 }
 
 const mark_objects = () => {
-  if (scope.length > 1) {
-    const pre_last = scope[scope.length - 2]
-    const last = scope[scope.length - 1]
-    mark_rec(pre_last, pre_last, true)
-    mark_rec(last, last, false)
+  const last = scope[scope.length - 1]
 
+  if (last - program_size > 1) {
+    mark_rec(last)
     if (REMOVE_MARKED) {
-      for (let i = pre_last + 1; i < last; ++i) {
-        if (!!stack[i] && !stack[i].stay) {
-          delete stack[i]
+      for (let i = program_size; i <= last; ++i) {
+        if (!!stack[i]) {
+          if (!stack[i].stay) {
+            delete stack[i]
+          } else {
+            stack[i].stay = null
+          }
         }
       }
     }
   }
 }
 
-const mark_rec = (index, border, more) => {
+const mark_rec = (index) => {
   stack[index].stay = true
   const tgt = stack[index].target
   Object.keys(tgt).forEach((at) => {
     const atr = tgt[at]
-    if (!!atr.cache && !stack[atr.cache].stay) {
-      if (more && atr.cache > border) {
-        mark_rec(atr.cache, border, more)
-      } else if (!more && atr.cache < border) {
-        mark_rec(atr.cache, border, more)
-      }
+    let ref = null
+    if (atr.cache == null && atr.xi != null) {
+      ref = atr.xi
+    } else if (atr.cache != null) {
+      ref = atr.cache
+    }
+    if (ref != null && ref >= program_size && ref < scope[scope.length - 1] && !stack[ref].stay) {
+      mark_rec(ref)
     }
   })
 }
@@ -395,7 +413,7 @@ const dataize = (index, with_scope = WITH_SCOPE_DEFAULT) => {
       } else if (Object.hasOwn(obj.target, PHI)) {
         push(dispatch(`${obj.name}.${PHI}`, index, PHI))
         const phi_i = morph(head(), index, true)
-        started = start_scope(with_scope, phi_i, PHI)
+        started = start_scope(with_scope, phi_i)
         data = dataize(phi_i, with_scope)
       } else if (Object.hasOwn(obj.target, LAMBDA)) {
         const atom = obj.target[LAMBDA].value
@@ -403,7 +421,6 @@ const dataize = (index, with_scope = WITH_SCOPE_DEFAULT) => {
           throw new Error(`Atom ${atom} does not exist`)
         }
         const atom_res_i = morph(atoms[atom](index), index)
-        // started = start_scope(with_scope, atom_res_i, LAMBDA)
         data = dataize(atom_res_i, with_scope)
       } else {
         throw new Error(`Can't dataize object ${index}, no ${DELTA}, no ${PHI}, no ${LAMBDA}`)
@@ -411,7 +428,6 @@ const dataize = (index, with_scope = WITH_SCOPE_DEFAULT) => {
       break
     default:
       const op_i = morph(index, index, true)
-      // started = start_scope(with_scope, op_i, '?') // todo
       data = dataize(op_i, with_scope)
       break
   }
@@ -421,15 +437,15 @@ const dataize = (index, with_scope = WITH_SCOPE_DEFAULT) => {
 
 // OBJECTS
 
-const before = stack_size()
+program_size = stack_size()
 
 try {
   const res = bytesOf.bytes(dataize(0, true)).asNumber()
   print_stack()
   console.log(`data: ${res}`)
   console.log(`total: ${stack_size()}`)
-  console.log(`in runtime: ${stack_size() - before}`)
-  console.log(`to delete: ${Object.keys(stack).filter((key) => key > before && !stack[key].stay).length}`)
+  console.log(`in runtime: ${stack_size() - program_size}`)
+  console.log(`to delete: ${Object.keys(stack).filter((key) => key > program_size && !stack[key].stay).length}`)
 } catch (e) {
   console.log(e)
   print_stack()
