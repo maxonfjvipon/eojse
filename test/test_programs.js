@@ -3,11 +3,12 @@ const fs = require('fs')
 const parser = require('xml2json')
 const {execSync} = require("child_process")
 const assert = require('assert')
+const yaml = require('js-yaml')
 
 const temp = path.resolve(__dirname, '..', 'temp')
 const resources = path.resolve(__dirname, '..', 'test-resources')
 const saxon = path.resolve(__dirname, '..', 'SaxonHE12-9J', 'saxon-he-12.9.jar')
-const runner = path.resolve(__dirname, '..', 'resources', 'program2.js')
+const runner = path.resolve(__dirname, '..', 'resources', 'program.js')
 const deps = ['bytes.js'].map((pth) => path.resolve(__dirname, '..', 'resources', pth))
 const eo_parser = '0.59.4'
 
@@ -59,13 +60,13 @@ if (fs.existsSync(temp)) {
 fs.mkdirSync(temp, {recursive: true})
 
 const programs = [
-  // 'simple',
-  // 'foo',
-  // 'eleven',
+  'simple',
+  'foo',
+  'eleven',
   'rec',
   "fibo",
   "self-ref",
-  // "fibo_minus"
+  "fibo_minus"
 ]
 
 describe('run programs', function () {
@@ -78,15 +79,15 @@ describe('run programs', function () {
       }
       fs.mkdirSync(dir, {recursive: true})
 
-      const source = path.resolve(resources, `${name}.json`)
+      const source = path.resolve(resources, `${name}.yaml`)
       const eo = path.resolve(dir, 'program.eo')
       const xmir = path.resolve(dir, '.eoc', '1-parse', 'program.xmir')
       const output = path.resolve(dir, '.eoc', '2-result', 'program.xmir')
       const prog = path.resolve(dir, '.eoc', 'program.js')
 
-      const {program, expected} = JSON.parse(fs.readFileSync(source, 'utf8'))
+      const {program, expected} = yaml.load(fs.readFileSync(source, 'utf8'))
 
-      fs.writeFileSync(path.resolve(dir, 'program.eo'), program.join('\n'))
+      fs.writeFileSync(path.resolve(dir, 'program.eo'), program)
 
       try {
         // parse EO to XMIR

@@ -1,9 +1,0 @@
-{
-  "program": [
-    "# Program.",
-    "[] > program",
-    "  42 > x",
-    "  x > @"
-  ],
-  "expected": "42"
-}

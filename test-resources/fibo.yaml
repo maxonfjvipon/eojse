@@ -1,0 +1,12 @@
+program: |
+  # Program
+  [] > program
+    [x] > fibo
+      if. > @
+        2.gt x
+        x
+        plus.
+          fibo (x.plus -1)
+          fibo (x.plus -2)
+    fibo 8 > @
+expected: '21'

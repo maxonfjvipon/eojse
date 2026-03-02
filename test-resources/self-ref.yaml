@@ -1,0 +1,11 @@
+program: |
+  # Program.
+  [] > program
+    [x] > rec
+      (x.plus 1).xi > next
+      if. > @
+        5.gt x
+        rec next
+        x
+    rec 1 > @
+expected: 5
