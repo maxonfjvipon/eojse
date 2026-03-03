@@ -1,23 +1,26 @@
-const bytesOf = require('./bytes.js')
-
-const PHI = 'φ'
-const DELTA = 'Δ'
-const RHO = 'ρ'
-const LAMBDA = 'λ'
-
-const REMOVE_UNNECESSARY = true
-const USE_CACHE = true
-const COPY_ON_APPLICATION = false
-const USE_D_SCOPES = true
-const REMOVE_D_MARKED = true
-const WITH_SCOPE_DEFAULT = false
-const HIDE_XI = false
-
-const FORMATION = "FRM", DISPATCH = "DSP", APPLICATION = "APP", COPY = "CPY", SET = "SET"
+const {
+  print_stack,
+  bytesOf,
+  REMOVE_UNNECESSARY,
+  USE_CACHE,
+  COPY_ON_APPLICATION,
+  USE_D_SCOPES,
+  REMOVE_D_MARKED,
+  WITH_SCOPE_DEFAULT,
+  HIDE_XI,
+  FORMATION,
+  APPLICATION,
+  DISPATCH,
+  COPY,
+  SET,
+  stack,
+  PHI,
+  DELTA,
+  RHO,
+  LAMBDA
+} = require('./helpers.js');
 
 let program_size, max_allocated, total_created, total_deleted = 0
-
-const stack = {}
 
 const push = (obj) => {
   if (stack_size() === 0) {
@@ -74,6 +77,25 @@ const start_d_scope = (start, value) => {
   return add
 }
 
+const mark_rec = (index) => {
+  stack[index].stay = true
+  const tgt = stack[index].target
+  Object.keys(tgt).forEach((at) => {
+    const atr = tgt[at]
+    let ref = null
+    if (atr.cache == null && atr.xi != null) {
+      ref = atr.xi
+    } else if (atr.cache != null) {
+      ref = atr.cache
+    }
+    if (ref != null && ref >= program_size && ref < d_scope[d_scope.length - 1] && !stack[ref].stay) {
+      mark_rec(ref)
+    }
+  })
+}
+
+
+
 const end_d_scope = (end) => {
   if (USE_D_SCOPES && end) {
     if (REMOVE_D_MARKED) {
@@ -86,7 +108,7 @@ const end_d_scope = (end) => {
         }
       }
     }
-    // console.log('pop scope', scope[scope.length - 1])
+    // console.log('pop scope', d_scope[d_scope.length - 1])
     d_scope.pop()
   }
 }
@@ -184,80 +206,6 @@ const atoms = {
 
     return res
   },
-}
-
-const print_object = (index) => {
-  const obj = stack[index]
-  let res
-  const form = (o) => {
-    let r = '{'
-    Object.keys(o).forEach((at, idx) => {
-      if (idx > 0) {
-        r += ', '
-      }
-      r += `'${at}':`
-      if (at === LAMBDA || o[at].value == null) {
-        r += `'${o[at].value}'`
-      } else if (at === DELTA) {
-        r += `[${o[at].value}]`
-      } else if (o[at].xi == null && o[at].cache == null) {
-        r += o[at].value
-      } else if (o[at].value === o[at].cache) {
-        r += `${o[at].value}!`
-      } else {
-        r += '{' + [o[at].value, HIDE_XI ? '*' : o[at].xi, o[at].cache].join(', ') + '}'
-      }
-    })
-    r += '}'
-    return r
-  }
-  switch (obj.type) {
-    case FORMATION:
-      res = [
-        `${index}: ${form(obj.target)}`,
-        // `${idx}: ${JSON.stringify(obj.target)}`,
-        Object.hasOwn(obj.target, DELTA) ? ' (DATA ' + bytesOf.bytes(obj.target[DELTA].value).verbose() + ')' : '',
-        !!obj.stay ? ' (STAY)' : '',
-        Object.hasOwn(obj, 'from_atom') ? ' (FROM ATOM)' : '',
-      ].join('')
-      break
-    case DISPATCH:
-      res = [
-        `${index}: `,
-        `${obj.target}.${obj.attr}`,
-      ].join('')
-      break
-    case APPLICATION:
-      res = [
-        `${index}: `,
-        `${obj.target}(${obj.attr}: ${obj.value})`,
-      ].join('')
-      break
-  }
-  return res + ' // ' + obj.name
-}
-
-const print_stack = () => {
-  Object.keys(stack).map(Number).forEach((idx) => {
-    console.log(print_object(idx))
-  })
-}
-
-const mark_rec = (index) => {
-  stack[index].stay = true
-  const tgt = stack[index].target
-  Object.keys(tgt).forEach((at) => {
-    const atr = tgt[at]
-    let ref = null
-    if (atr.cache == null && atr.xi != null) {
-      ref = atr.xi
-    } else if (atr.cache != null) {
-      ref = atr.cache
-    }
-    if (ref != null && ref >= program_size && ref < d_scope[d_scope.length - 1] && !stack[ref].stay) {
-      mark_rec(ref)
-    }
-  })
 }
 
 const exec = (op) => {

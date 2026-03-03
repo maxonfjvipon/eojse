@@ -9,7 +9,7 @@ const temp = path.resolve(__dirname, '..', 'temp')
 const resources = path.resolve(__dirname, '..', 'test-resources')
 const saxon = path.resolve(__dirname, '..', 'SaxonHE12-9J', 'saxon-he-12.9.jar')
 const runner = path.resolve(__dirname, '..', 'resources', 'program.js')
-const deps = ['bytes.js'].map((pth) => path.resolve(__dirname, '..', 'resources', pth))
+const deps = ['helpers.js'].map((pth) => path.resolve(__dirname, '..', 'resources', pth))
 const eo_parser = '0.59.4'
 
 const xsls = [

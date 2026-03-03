@@ -1,3 +1,77 @@
+const REMOVE_UNNECESSARY = true
+const USE_CACHE = true
+const COPY_ON_APPLICATION = false
+const USE_D_SCOPES = true
+const REMOVE_D_MARKED = true
+const WITH_SCOPE_DEFAULT = false
+const HIDE_XI = false
+
+const FORMATION = "FRM", DISPATCH = "DSP", APPLICATION = "APP", COPY = "CPY", SET = "SET"
+
+const PHI = 'φ'
+const DELTA = 'Δ'
+const RHO = 'ρ'
+const LAMBDA = 'λ'
+
+const stack = {}
+
+const print_object = (index) => {
+  const obj = stack[index]
+  let res
+  const form = (o) => {
+    let r = '{'
+    Object.keys(o).forEach((at, idx) => {
+      if (idx > 0) {
+        r += ', '
+      }
+      r += `'${at}':`
+      if (at === LAMBDA || o[at].value == null) {
+        r += `'${o[at].value}'`
+      } else if (at === DELTA) {
+        r += `[${o[at].value}]`
+      } else if (o[at].xi == null && o[at].cache == null) {
+        r += o[at].value
+      } else if (o[at].value === o[at].cache) {
+        r += `${o[at].value}!`
+      } else {
+        r += '{' + [o[at].value, HIDE_XI ? '*' : o[at].xi, o[at].cache].join(', ') + '}'
+      }
+    })
+    r += '}'
+    return r
+  }
+  switch (obj.type) {
+    case FORMATION:
+      res = [
+        `${index}: ${form(obj.target)}`,
+        // `${idx}: ${JSON.stringify(obj.target)}`,
+        Object.hasOwn(obj.target, DELTA) ? ' (DATA ' + bytesOf.bytes(obj.target[DELTA].value).verbose() + ')' : '',
+        !!obj.stay ? ' (STAY)' : '',
+        Object.hasOwn(obj, 'from_atom') ? ' (FROM ATOM)' : '',
+      ].join('')
+      break
+    case DISPATCH:
+      res = [
+        `${index}: `,
+        `${obj.target}.${obj.attr}`,
+      ].join('')
+      break
+    case APPLICATION:
+      res = [
+        `${index}: `,
+        `${obj.target}(${obj.attr}: ${obj.value})`,
+      ].join('')
+      break
+  }
+  return res + ' // ' + obj.name
+}
+
+const print_stack = () => {
+  Object.keys(stack).map(Number).forEach((idx) => {
+    console.log(print_object(idx))
+  })
+}
+
 const hexToInt = function (bytes) {
   let byte
   return bytes.map((hex) => {
@@ -111,4 +185,25 @@ const conversion = function (bytes) {
   }
 }
 
-module.exports = bytesOf
+module.exports = {
+  print_object,
+  print_stack,
+  bytesOf,
+  REMOVE_UNNECESSARY,
+  USE_CACHE,
+  COPY_ON_APPLICATION,
+  USE_D_SCOPES,
+  REMOVE_D_MARKED,
+  WITH_SCOPE_DEFAULT,
+  HIDE_XI,
+  FORMATION,
+  APPLICATION,
+  DISPATCH,
+  COPY,
+  SET,
+  stack,
+  PHI,
+  DELTA,
+  RHO,
+  LAMBDA
+}
