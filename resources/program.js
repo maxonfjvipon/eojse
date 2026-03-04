@@ -4,11 +4,10 @@ const {
   REMOVE_UNNECESSARY,
   USE_CACHE,
   COPY_ON_APPLICATION,
-  USE_D_SCOPES,
-  REMOVE_D_MARKED,
-  WITH_SCOPE_DEFAULT,
-  HIDE_XI,
+  USE_PHI_POINTS,
+  REMOVE_ON_POINTS,
   FORMATION,
+  WITH_PHI_POINTS_DEFAULT,
   APPLICATION,
   DISPATCH,
   COPY,
@@ -50,19 +49,17 @@ const head = () => {
   return keys[keys.length - 1]
 }
 
-const d_scope = []
+const phi_points = []
 
-// limit scope for atoms
-// unlimited scope for global dataization
-const start_d_scope = (start, value) => {
-  const add = USE_D_SCOPES && start && (d_scope.length === 0 || value > d_scope[d_scope.length - 1])
+const add_phi_point = (add, value, scope) => {
+  add = USE_PHI_POINTS && add && (phi_points.length === 0 || value > phi_points[phi_points.length - 1])
   if (add) {
     // console.log('add scope', value)
-    d_scope.push(value)
-    if (value - program_size > 1) {
-      mark_rec(value)
-      if (REMOVE_D_MARKED) {
-        for (let i = program_size; i <= value; ++i) {
+    phi_points.push(value)
+    if (value - scope > 1) {
+      mark_rec(value, scope)
+      if (REMOVE_ON_POINTS) {
+        for (let i = scope + 1; i <= value; ++i) {
           if (!!stack[i]) {
             if (!stack[i].stay) {
               pop(i)
@@ -77,7 +74,7 @@ const start_d_scope = (start, value) => {
   return add
 }
 
-const mark_rec = (index) => {
+const mark_rec = (index, scope) => {
   stack[index].stay = true
   const tgt = stack[index].target
   Object.keys(tgt).forEach((at) => {
@@ -88,18 +85,16 @@ const mark_rec = (index) => {
     } else if (atr.cache != null) {
       ref = atr.cache
     }
-    if (ref != null && ref >= program_size && ref < d_scope[d_scope.length - 1] && !stack[ref].stay) {
-      mark_rec(ref)
+    if (ref != null && ref > scope && ref < phi_points[phi_points.length - 1] && !stack[ref].stay) {
+      mark_rec(ref, scope)
     }
   })
 }
 
-
-
-const end_d_scope = (end) => {
-  if (USE_D_SCOPES && end) {
-    if (REMOVE_D_MARKED) {
-      const until = d_scope.length > 1 ? d_scope[d_scope.length - 2] : program_size - 1
+const pop_phi_point = (end, scope) => {
+  if (USE_PHI_POINTS && end) {
+    if (REMOVE_ON_POINTS) {
+      const until = phi_points.length > 1 ? phi_points[phi_points.length - 2] : scope
       while (true) {
         if (head() > until) {
           pop()
@@ -109,7 +104,7 @@ const end_d_scope = (end) => {
       }
     }
     // console.log('pop scope', d_scope[d_scope.length - 1])
-    d_scope.pop()
+    phi_points.pop()
   }
 }
 
@@ -350,7 +345,7 @@ const morph = (index, context, remove) => {
   return res
 }
 
-const dataize = (index, with_scope = WITH_SCOPE_DEFAULT) => {
+const dataize = (index, scope = program_size - 1, with_scope = WITH_PHI_POINTS_DEFAULT) => {
   const obj = stack[index]
   let data, started = false
   switch (obj.type) {
@@ -360,25 +355,25 @@ const dataize = (index, with_scope = WITH_SCOPE_DEFAULT) => {
       } else if (Object.hasOwn(obj.target, PHI)) {
         push(dispatch(`${obj.name}.${PHI}`, index, PHI))
         const phi_i = morph(head(), index, true)
-        started = start_d_scope(with_scope, phi_i)
-        data = dataize(phi_i, with_scope)
+        started = add_phi_point(with_scope, phi_i, scope)
+        data = dataize(phi_i, scope, with_scope)
       } else if (Object.hasOwn(obj.target, LAMBDA)) {
         const atom = obj.target[LAMBDA].value
         if (!Object.hasOwn(atoms, atom)) {
           throw new Error(`Atom ${atom} does not exist`)
         }
         const atom_res_i = morph(atoms[atom](index), index)
-        data = dataize(atom_res_i, with_scope)
+        data = dataize(atom_res_i, scope, with_scope)
       } else {
         throw new Error(`Can't dataize object ${index}, no ${DELTA}, no ${PHI}, no ${LAMBDA}`)
       }
       break
     default:
       const op_i = morph(index, index, true)
-      data = dataize(op_i, with_scope)
+      data = dataize(op_i, scope, with_scope)
       break
   }
-  end_d_scope(started)
+  pop_phi_point(started, scope)
   return data
 }
 
@@ -389,7 +384,7 @@ max_allocated = stack_size()
 total_created = stack_size()
 
 try {
-  const res = bytesOf.bytes(dataize(0, true)).asNumber()
+  const res = bytesOf.bytes(dataize(0, head(), true)).asNumber()
   print_stack()
   console.log(`data: ${res}`)
   console.log(`original program size: ${program_size}`)
