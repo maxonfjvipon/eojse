@@ -1,5 +1,5 @@
 const {
-  print_stack,
+  print_memory,
   bytesOf,
   REMOVE_UNNECESSARY,
   USE_CACHE,
@@ -12,7 +12,7 @@ const {
   DISPATCH,
   COPY,
   SET,
-  stack,
+  memory,
   PHI,
   DELTA,
   RHO,
@@ -22,29 +22,29 @@ const {
 let program_size, max_allocated, total_created, total_deleted = 0
 
 const push = (obj) => {
-  if (stack_size() === 0) {
-    stack[0] = obj
+  if (memory_size() === 0) {
+    memory[0] = obj
   } else {
-    stack[head() + 1] = obj
+    memory[head() + 1] = obj
   }
   ++total_created
-  if (stack_size() > max_allocated) {
-    max_allocated = stack_size()
+  if (memory_size() > max_allocated) {
+    max_allocated = memory_size()
   }
 }
 
 const pop = (idx = null) => {
   idx = idx || head()
-  delete stack[idx]
+  delete memory[idx]
   ++total_deleted
 }
 
-const stack_size = () => Object.keys(stack).length;
+const memory_size = () => Object.keys(memory).length;
 
 const head = () => {
-  const keys = Object.keys(stack).map(Number)
+  const keys = Object.keys(memory).map(Number)
   if (keys.length === 0) {
-    throw new Error("Can't get head from empty stack")
+    throw new Error("Can't get head from empty memory")
   }
   return keys[keys.length - 1]
 }
@@ -60,11 +60,11 @@ const add_phi_point = (add, value, scope) => {
       mark_rec(value, scope)
       if (REMOVE_ON_POINTS) {
         for (let i = scope + 1; i <= value; ++i) {
-          if (!!stack[i]) {
-            if (!stack[i].stay) {
+          if (!!memory[i]) {
+            if (!memory[i].stay) {
               pop(i)
             } else {
-              stack[i].stay = null
+              memory[i].stay = null
             }
           }
         }
@@ -75,8 +75,8 @@ const add_phi_point = (add, value, scope) => {
 }
 
 const mark_rec = (index, scope) => {
-  stack[index].stay = true
-  const tgt = stack[index].target
+  memory[index].stay = true
+  const tgt = memory[index].target
   Object.keys(tgt).forEach((at) => {
     const atr = tgt[at]
     let ref = null
@@ -85,7 +85,7 @@ const mark_rec = (index, scope) => {
     } else if (atr.cache != null) {
       ref = atr.cache
     }
-    if (ref != null && ref > scope && ref < phi_points[phi_points.length - 1] && !stack[ref].stay) {
+    if (ref != null && ref > scope && ref < phi_points[phi_points.length - 1] && !memory[ref].stay) {
       mark_rec(ref, scope)
     }
   })
@@ -155,7 +155,7 @@ const atoms = {
     push(application(`${num}(0: ${_bts})`, num, 0, _bts))
     const res = morph(head(), self, true)
 
-    stack[res].from_atom = true
+    memory[res].from_atom = true
 
     return res
   },
@@ -171,7 +171,7 @@ const atoms = {
     push(dispatch('Q.' + bool, 0, bool))
     const res = morph(head(), self, true)
 
-    stack[res].from_atom = true
+    memory[res].from_atom = true
 
     return res
   },
@@ -197,7 +197,7 @@ const atoms = {
     push(application(`${num}(0: ${_bts})`, num, 0, _bts))
     const res = morph(head(), self, true)
 
-    stack[res].from_atom = true
+    memory[res].from_atom = true
 
     return res
   },
@@ -207,12 +207,12 @@ const exec = (op) => {
   let res, tgt
   switch (op.type) {
     case COPY:
-      const clone = structuredClone(stack[op.target])
+      const clone = structuredClone(memory[op.target])
       push({...clone, name: '(copy ' + clone.name + ')', origin: op.target})
       res = head()
       break
     case SET:
-      tgt = stack[op.target].target
+      tgt = memory[op.target].target
 
       let at
       if (typeof op.attr === 'string') {
@@ -229,7 +229,7 @@ const exec = (op) => {
 }
 
 const need_contextualize = (index) => {
-  const obj = stack[index]
+  const obj = memory[index]
   let need
   switch (obj.type) {
     case FORMATION:
@@ -246,7 +246,7 @@ const need_contextualize = (index) => {
 }
 
 const morph = (index, context, remove) => {
-  const obj = stack[index]
+  const obj = memory[index]
   const clear = REMOVE_UNNECESSARY && remove
   let res, tgt_i, at
   switch (obj.type) {
@@ -263,7 +263,7 @@ const morph = (index, context, remove) => {
       } else {
         tgt_i = morph(obj.target, context)
       }
-      const tgt = stack[tgt_i].target
+      const tgt = memory[tgt_i].target
 
       if (obj.attr === '-1') {
         res = context
@@ -288,7 +288,7 @@ const morph = (index, context, remove) => {
             }
           }
 
-          if (at_i !== 0 && obj.attr !== RHO && !Object.hasOwn(stack[at_i].target, RHO)) {
+          if (at_i !== 0 && obj.attr !== RHO && !Object.hasOwn(memory[at_i].target, RHO)) {
             res = exec(copy(at_i))
             if (USE_CACHE) {
               res = exec(set(res, RHO, attr(tgt_i, null, tgt_i)))
@@ -335,7 +335,7 @@ const morph = (index, context, remove) => {
         tgt_i = exec(copy(tgt_i))
       }
 
-      if (USE_CACHE && stack[at.value].type === FORMATION) {
+      if (USE_CACHE && memory[at.value].type === FORMATION) {
         at.cache = at.value
       }
 
@@ -346,7 +346,7 @@ const morph = (index, context, remove) => {
 }
 
 const dataize = (index, scope = program_size - 1, with_scope = WITH_PHI_POINTS_DEFAULT) => {
-  const obj = stack[index]
+  const obj = memory[index]
   let data, started = false
   switch (obj.type) {
     case FORMATION:
@@ -379,13 +379,13 @@ const dataize = (index, scope = program_size - 1, with_scope = WITH_PHI_POINTS_D
 
 // OBJECTS
 
-program_size = stack_size()
-max_allocated = stack_size()
-total_created = stack_size()
+program_size = memory_size()
+max_allocated = memory_size()
+total_created = memory_size()
 
 try {
   const res = bytesOf.bytes(dataize(0, head(), true)).asNumber()
-  print_stack()
+  print_memory()
   console.log(`data: ${res}`)
   console.log(`original program size: ${program_size}`)
   console.log(`total created: ${total_created}`)
@@ -395,6 +395,6 @@ try {
   console.log(`max depth without program: ${max_allocated - program_size}`)
 } catch (e) {
   console.log(e)
-  print_stack()
+  print_memory()
   throw e
 }

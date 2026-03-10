@@ -13,10 +13,10 @@ const DELTA = 'Δ'
 const RHO = 'ρ'
 const LAMBDA = 'λ'
 
-const stack = {}
+const memory = {}
 
 const print_object = (index) => {
-  const obj = stack[index]
+  const obj = memory[index]
   let res
   const form = (o) => {
     let r = '{'
@@ -66,8 +66,8 @@ const print_object = (index) => {
   return res + ' // ' + obj.name
 }
 
-const print_stack = () => {
-  Object.keys(stack).map(Number).forEach((idx) => {
+const print_memory = () => {
+  Object.keys(memory).map(Number).forEach((idx) => {
     console.log(print_object(idx))
   })
 }
@@ -187,7 +187,7 @@ const conversion = function (bytes) {
 
 module.exports = {
   print_object,
-  print_stack,
+  print_memory,
   bytesOf,
   REMOVE_UNNECESSARY,
   USE_CACHE,
@@ -201,7 +201,7 @@ module.exports = {
   DISPATCH,
   COPY,
   SET,
-  stack,
+  memory,
   PHI,
   DELTA,
   RHO,
