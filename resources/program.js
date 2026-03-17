@@ -363,6 +363,7 @@ const dataize = (index, scope = program_size - 1, with_scope = WITH_PHI_POINTS_D
           throw new Error(`Atom ${atom} does not exist`)
         }
         const atom_res_i = morph(atoms[atom](index), index)
+        started = add_phi_point(atom_res_i, scope, with_scope)
         data = dataize(atom_res_i, scope, with_scope)
       } else {
         throw new Error(`Can't dataize object ${index}, no ${DELTA}, no ${PHI}, no ${LAMBDA}`)
