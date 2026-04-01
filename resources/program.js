@@ -54,7 +54,7 @@ const phi_points = []
 const add_phi_point = (add, value, scope) => {
   add = USE_PHI_POINTS && add && (phi_points.length === 0 || value > phi_points[phi_points.length - 1])
   if (add) {
-    // console.log('add scope', value)
+    // console.log('add phi', value)
     phi_points.push(value)
     if (value - scope > 1) {
       mark_rec(value, scope)
@@ -72,6 +72,39 @@ const add_phi_point = (add, value, scope) => {
     }
   }
   return add
+}
+
+const add_disp_point = (from, phi, after = false) => {
+  mark_disps(from, from, phi)
+  if (after) {
+    mark_disps(phi, from, phi)
+  }
+  for (let i = from; i <= phi; ++i) {
+    if (!!memory[i]) {
+      if (!memory[i].stay) {
+        pop(i)
+      } else {
+        memory[i].stay = null
+      }
+    }
+  }
+}
+
+const mark_disps = (start, from, to) => {
+  memory[start].stay = true
+  const tgt = memory[start].target
+  Object.keys(tgt).forEach((at) => {
+    const atr = tgt[at]
+    let ref = null
+    if (atr.cache == null && atr.xi != null) {
+      ref = atr.xi
+    } else if (atr.cache != null) {
+      ref = atr.cache
+    }
+    if (ref != null && ref >= from && ref <= to && !memory[ref].stay) {
+      mark_disps(ref, from, to)
+    }
+  })
 }
 
 const mark_rec = (index, scope) => {
@@ -103,7 +136,7 @@ const pop_phi_point = (end, scope) => {
         }
       }
     }
-    // console.log('pop scope', d_scope[d_scope.length - 1])
+    // console.log('pop phi', phi_points[phi_points.length - 1])
     phi_points.pop()
   }
 }
@@ -301,8 +334,10 @@ const morph = (index, context, remove) => {
         } else if (Object.hasOwn(tgt, PHI)) {
           push(dispatch(`${tgt_i}.${PHI}`, tgt_i, PHI))
           const phi_i = morph(head(), tgt_i, true)
+          add_disp_point(tgt_i, phi_i)
           push(dispatch(`${phi_i}.${obj.attr}`, phi_i, obj.attr))
           res = morph(head(), phi_i, true)
+          add_disp_point(tgt_i, res, true)
         } else if (Object.hasOwn(tgt, LAMBDA)) {
           const atom = tgt[LAMBDA].value
           if (!Object.hasOwn(atoms, atom)) {
@@ -311,6 +346,7 @@ const morph = (index, context, remove) => {
           const atom_res_i = morph(atoms[atom](tgt_i), tgt_i)
           push(dispatch(`${atom_res_i}.${obj.attr}`, atom_res_i, obj.attr))
           res = morph(head(), atom_res_i, true)
+          // add_disp_point(tgt_i, res, true)
         } else {
           throw new Error(`Bad dispatch on ${index}, can't go though ${obj.attr}, ${PHI} or ${LAMBDA}`)
         }
@@ -363,7 +399,7 @@ const dataize = (index, scope = program_size - 1, with_scope = WITH_PHI_POINTS_D
           throw new Error(`Atom ${atom} does not exist`)
         }
         const atom_res_i = morph(atoms[atom](index), index)
-        started = add_phi_point(atom_res_i, scope, with_scope)
+        started = add_phi_point(with_scope, atom_res_i, scope)
         data = dataize(atom_res_i, scope, with_scope)
       } else {
         throw new Error(`Can't dataize object ${index}, no ${DELTA}, no ${PHI}, no ${LAMBDA}`)

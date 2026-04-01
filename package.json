@@ -1,7 +1,6 @@
 {
   "name": "eo-runtime",
-  "version": "1.0.0",
-  "main": "index.js",
+  "version": "0.0.0",
   "dependencies": {
     "xml2json": "^0.12.0",
     "js-yaml": "^4.1.1"

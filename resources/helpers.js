@@ -66,8 +66,8 @@ const print_object = (index) => {
   return res + ' // ' + obj.name
 }
 
-const print_memory = () => {
-  Object.keys(memory).map(Number).forEach((idx) => {
+const print_memory = (from = null) => {
+  Object.keys(memory).map(Number).filter((num) => !from || num >= from).forEach((idx) => {
     console.log(print_object(idx))
   })
 }
