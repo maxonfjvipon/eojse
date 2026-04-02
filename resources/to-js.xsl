@@ -44,6 +44,10 @@
         <xsl:value-of select="@atom"/>
         <xsl:text>'</xsl:text>
       </xsl:if>
+      <xsl:if test="@cache">
+        <xsl:text>, null, </xsl:text>
+        <xsl:value-of select="@id"/>
+      </xsl:if>
       <xsl:text>)</xsl:text>
     </xsl:for-each>
     <xsl:text>})) // </xsl:text>
@@ -76,9 +80,6 @@
       <xsl:text>-1</xsl:text>
     </xsl:if>
     <xsl:text>'</xsl:text>
-    <xsl:if test="@cache">
-      <xsl:text>, true</xsl:text>
-    </xsl:if>
     <xsl:text>)) // </xsl:text>
     <xsl:value-of select="@id"/>
   </xsl:template>

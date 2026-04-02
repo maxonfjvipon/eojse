@@ -21,6 +21,8 @@ const {
 
 let program_size, max_allocated, total_created, total_deleted = 0
 
+let cache = 0, max_cache = 0, caches = []
+
 const push = (obj) => {
   if (memory_size() === 0) {
     memory[0] = obj
@@ -54,11 +56,12 @@ const phi_points = []
 const add_phi_point = (add, value, scope) => {
   add = USE_PHI_POINTS && add && (phi_points.length === 0 || value > phi_points[phi_points.length - 1])
   if (add) {
-    // console.log('add phi', value)
+    // console.log('add phi', scope, value, value - scope)
     phi_points.push(value)
     if (value - scope > 1) {
       mark_rec(value, scope)
       if (REMOVE_ON_POINTS) {
+        update_cache()
         for (let i = scope + 1; i <= value; ++i) {
           if (!!memory[i]) {
             if (!memory[i].stay) {
@@ -74,11 +77,21 @@ const add_phi_point = (add, value, scope) => {
   return add
 }
 
+const update_cache = () => {
+  caches = []
+  if (cache > max_cache) {
+    max_cache = cache
+  }
+  cache = 0
+}
+
 const add_disp_point = (from, phi, after = false) => {
+  // console.log('add disp', from, phi, phi - from)
   mark_disps(from, from, phi)
   if (after) {
     mark_disps(phi, from, phi)
   }
+  update_cache()
   for (let i = from; i <= phi; ++i) {
     if (!!memory[i]) {
       if (!memory[i].stay) {
@@ -317,6 +330,8 @@ const morph = (index, context, remove) => {
             at_i = morph(at.value, ctx)
 
             if (USE_CACHE && tgt[obj.attr].cache == null) {
+              cache++
+              caches.push(tgt_i)
               tgt[obj.attr].cache = at_i
             }
           }
@@ -324,6 +339,8 @@ const morph = (index, context, remove) => {
           if (at_i !== 0 && obj.attr !== RHO && !Object.hasOwn(memory[at_i].target, RHO)) {
             res = exec(copy(at_i))
             if (USE_CACHE) {
+              cache++
+              caches.push(res)
               res = exec(set(res, RHO, attr(tgt_i, null, tgt_i)))
             } else {
               res = exec(set(res, RHO, attr(tgt_i)))
@@ -430,6 +447,7 @@ try {
   console.log(`total deleted: ${total_deleted}`)
   console.log(`max depth: ${max_allocated}`)
   console.log(`max depth without program: ${max_allocated - program_size}`)
+  console.log(`max set cache: ${max_cache}`)
 } catch (e) {
   console.log(e)
   print_memory()

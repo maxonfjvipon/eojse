@@ -9,6 +9,9 @@
           <xsl:element name="attribute">
             <xsl:attribute name="name" select="@name"/>
             <xsl:attribute name="id" select="@id"/>
+            <xsl:if test="name()='formation'">
+              <xsl:attribute name="cache"/>
+            </xsl:if>
           </xsl:element>
         </xsl:for-each>
       </formation>
@@ -40,6 +43,9 @@
         <xsl:element name="attribute">
           <xsl:attribute name="name" select="@name"/>
           <xsl:attribute name="id" select="@id"/>
+          <xsl:if test="name()='formation'">
+            <xsl:attribute name="cache"/>
+          </xsl:if>
         </xsl:element>
       </xsl:for-each>
     </xsl:copy>

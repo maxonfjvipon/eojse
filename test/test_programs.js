@@ -22,7 +22,6 @@ const xsls = [
   'dispatch.xsl',
   'noise.xsl',
   'ids.xsl',
-  'cache.xsl',
   'flat-apps-forms.xsl',
   'flat-disps.xsl',
   'to-js.xsl'
