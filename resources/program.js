@@ -138,20 +138,20 @@ const mark_rec = (index, scope) => {
 }
 
 const pop_phi_point = (end, scope) => {
-  if (USE_PHI_POINTS && end) {
-    if (REMOVE_ON_POINTS) {
-      const until = phi_points.length > 1 ? phi_points[phi_points.length - 2] : scope
-      while (true) {
-        if (head() > until) {
-          pop()
-        } else {
-          break
-        }
-      }
-    }
-    // console.log('pop phi', phi_points[phi_points.length - 1])
-    phi_points.pop()
-  }
+  // if (USE_PHI_POINTS && end) {
+  //   if (REMOVE_ON_POINTS) {
+  //     const until = phi_points.length > 1 ? phi_points[phi_points.length - 2] : scope
+  //     while (true) {
+  //       if (head() > until) {
+  //         pop()
+  //       } else {
+  //         break
+  //       }
+  //     }
+  //   }
+  //   // console.log('pop phi', phi_points[phi_points.length - 1])
+  //   phi_points.pop()
+  // }
 }
 
 const attr = (value, xi = null, cache = null) => ({value, xi, cache})
