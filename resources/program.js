@@ -5,7 +5,7 @@ const {
   USE_CACHE,
   COPY_ON_APPLICATION,
   FORMATION,
-  WITH_PHI_POINTS_DEFAULT,
+  GC_ENABLED_DEFAULT,
   APPLICATION,
   DISPATCH,
   COPY,
@@ -17,13 +17,13 @@ const {
   LAMBDA
 } = require('./helpers.js');
 
-let program_size = 0, max_allocated = 0, total_created = 0, total_deleted = 0, max_ref_holders = 0
+let program_size = 0, peak_live = 0, total_created = 0, total_deleted = 0, max_ref_holders = 0
 
 const push = (obj) => {
   memory.push(obj)
   ++total_created
-  if (memory_size() > max_allocated) {
-    max_allocated = memory_size()
+  if (memory_size() > peak_live) {
+    peak_live = memory_size()
   }
 }
 
@@ -31,11 +31,15 @@ const trim = () => {
   while (memory.length > 0 && memory[memory.length - 1] == null) memory.length--
 }
 
-const pop = (idx = null) => {
-  idx = idx === null ? head() : idx
+const del = (idx) => {
   memory[idx] = null
   ++total_deleted
-  trim()
+  ref_holders.delete(idx)
+}
+
+const pop = () => {
+  del(head())
+  memory.length--
 }
 
 const memory_size = () => memory.filter(x => x != null).length;
@@ -45,11 +49,11 @@ const head = () => {
   return memory.length - 1
 }
 
-let last_phi = -1
+let phi_watermark = -1
 
 let ref_holders = new Set()
 
-const update_obj_refs = (obj, r) => {
+const remap_refs = (obj, r) => {
   Object.keys(obj.target).forEach((at) => {
     const atr = obj.target[at]
     if (atr.cache != null) {
@@ -68,16 +72,16 @@ const update_obj_refs = (obj, r) => {
 const compact = (from, to, pivot) => {
   const end = Math.min(to, memory.length - 1)
 
-  let new_idx = from
-  while (new_idx <= end && memory[new_idx] != null && memory[new_idx].stay) {
-    memory[new_idx].stay = null
-    ++new_idx
+  let cursor = from
+  while (cursor <= end && memory[cursor] != null && memory[cursor].stay) {
+    memory[cursor].stay = null
+    ++cursor
   }
-  if (new_idx > end) return pivot
+  if (cursor > end) return pivot
 
-  const first_dest = new_idx
-  let dest = new_idx
-  for (let i = new_idx; i <= end; ++i) {
+  const first_dest = cursor
+  let dest = cursor
+  for (let i = cursor; i <= end; ++i) {
     const obj = memory[i]
     if (obj == null) continue
     if (obj.stay) {
@@ -85,8 +89,7 @@ const compact = (from, to, pivot) => {
       obj.fwd = dest
       ++dest
     } else {
-      memory[i] = null
-      ++total_deleted
+      del(i)
     }
   }
 
@@ -96,7 +99,7 @@ const compact = (from, to, pivot) => {
   }
 
   for (let i = from; i <= end; ++i) {
-    if (memory[i] != null) update_obj_refs(memory[i], r)
+    if (memory[i] != null) remap_refs(memory[i], r)
   }
 
   const next_holders = new Set()
@@ -118,7 +121,7 @@ const compact = (from, to, pivot) => {
 
   ref_holders = next_holders
   if (ref_holders.size > max_ref_holders) max_ref_holders = ref_holders.size
-  if (last_phi >= 0) last_phi = r(last_phi)
+  if (phi_watermark >= 0) phi_watermark = r(phi_watermark)
   const result = r(pivot)
 
   for (let i = first_dest; i <= end; ++i) {
@@ -133,21 +136,21 @@ const compact = (from, to, pivot) => {
   return result
 }
 
-const add_phi_point = (add, value, scope) => {
-  add = add && (last_phi < 0 || value > last_phi)
-  if (add) {
-    last_phi = value
+const gc_phi = (gc_enabled, value, scope) => {
+  gc_enabled = gc_enabled && (phi_watermark < 0 || value > phi_watermark)
+  if (gc_enabled) {
+    phi_watermark = value
     if (value - scope > 1) {
-      mark_rec(value, scope)
+      mark_phi(value, scope)
       value = compact(scope + 1, value, value)
     }
   }
-  return {add, value}
+  return value
 }
 
-const add_disp_point = (from, phi) => {
-  mark_disps(from, from, phi)
-  mark_disps(phi, from, phi)
+const gc_disp = (from, phi) => {
+  mark_disp(from, from, phi)
+  mark_disp(phi, from, phi)
   return compact(from, phi, phi)
 }
 
@@ -167,11 +170,11 @@ const mark = (index, in_range, recurse) => {
   })
 }
 
-const mark_disps = (start, from, to) =>
-  mark(start, (ref) => ref >= from && ref <= to, (ref) => mark_disps(ref, from, to))
+const mark_disp = (start, from, to) =>
+  mark(start, (ref) => ref >= from && ref <= to, (ref) => mark_disp(ref, from, to))
 
-const mark_rec = (index, scope) =>
-  mark(index, (ref) => ref > scope && ref < last_phi, (ref) => mark_rec(ref, scope))
+const mark_phi = (index, scope) =>
+  mark(index, (ref) => ref > scope && ref < phi_watermark, (ref) => mark_phi(ref, scope))
 
 const attr = (value, xi = null, cache = null) => ({value, xi, cache})
 
@@ -300,7 +303,7 @@ const exec = (op) => {
   return res
 }
 
-const need_contextualize = (index) => {
+const needs_context = (index) => {
   const obj = memory[index]
   let need
   switch (obj.type) {
@@ -308,10 +311,10 @@ const need_contextualize = (index) => {
       need = false
       break
     case DISPATCH:
-      need = obj.target === -1 || need_contextualize(obj.target)
+      need = obj.target === -1 || needs_context(obj.target)
       break
     case APPLICATION:
-      need = obj.target === -1 || obj.value === -1 || need_contextualize(obj.target) || need_contextualize(obj.value)
+      need = obj.target === -1 || obj.value === -1 || needs_context(obj.target) || needs_context(obj.value)
       break
   }
   return need
@@ -376,10 +379,10 @@ const morph = (index, context, remove) => {
         } else if (Object.hasOwn(tgt, PHI)) {
           push(dispatch(`${tgt_i}.${PHI}`, tgt_i, PHI))
           let phi_i = morph(head(), tgt_i, true)
-          phi_i = add_disp_point(tgt_i, phi_i)
+          phi_i = gc_disp(tgt_i, phi_i)
           push(dispatch(`${phi_i}.${obj.attr}`, phi_i, obj.attr))
           res = morph(head(), phi_i, true)
-          res = add_disp_point(tgt_i, res)
+          res = gc_disp(tgt_i, res)
         } else if (Object.hasOwn(tgt, LAMBDA)) {
           const atom = tgt[LAMBDA].value
           if (!Object.hasOwn(atoms, atom)) {
@@ -402,7 +405,7 @@ const morph = (index, context, remove) => {
 
       if (obj.value === -1) {
         at = attr(context)
-      } else if (need_contextualize(obj.value)) {
+      } else if (needs_context(obj.value)) {
         at = attr(obj.value, context)
       } else {
         at = attr(obj.value)
@@ -422,7 +425,7 @@ const morph = (index, context, remove) => {
   return res
 }
 
-const dataize = (index, scope = program_size - 1, use_points = WITH_PHI_POINTS_DEFAULT) => {
+const dataize = (index, scope = program_size - 1, gc_enabled = GC_ENABLED_DEFAULT) => {
   const obj = memory[index]
   let data
   switch (obj.type) {
@@ -432,23 +435,23 @@ const dataize = (index, scope = program_size - 1, use_points = WITH_PHI_POINTS_D
       } else if (Object.hasOwn(obj.target, PHI)) {
         push(dispatch(`${obj.name}.${PHI}`, index, PHI))
         let phi_i = morph(head(), index, true)
-        phi_i = add_phi_point(use_points, phi_i, scope).value
-        data = dataize(phi_i, scope, use_points)
+        phi_i = gc_phi(gc_enabled, phi_i, scope)
+        data = dataize(phi_i, scope, gc_enabled)
       } else if (Object.hasOwn(obj.target, LAMBDA)) {
         const atom = obj.target[LAMBDA].value
         if (!Object.hasOwn(atoms, atom)) {
           throw new Error(`Atom ${atom} does not exist`)
         }
         let atom_res_i = morph(atoms[atom](index), index)
-        atom_res_i = add_phi_point(use_points, atom_res_i, scope).value
-        data = dataize(atom_res_i, scope, use_points)
+        atom_res_i = gc_phi(gc_enabled, atom_res_i, scope)
+        data = dataize(atom_res_i, scope, gc_enabled)
       } else {
         throw new Error(`Can't dataize object ${index}, no ${DELTA}, no ${PHI}, no ${LAMBDA}`)
       }
       break
     default:
       const op_i = morph(index, index, true)
-      data = dataize(op_i, scope, use_points)
+      data = dataize(op_i, scope, gc_enabled)
       break
   }
   return data
@@ -457,7 +460,7 @@ const dataize = (index, scope = program_size - 1, use_points = WITH_PHI_POINTS_D
 // OBJECTS
 
 program_size = memory_size()
-max_allocated = memory_size()
+peak_live = memory_size()
 total_created = memory_size()
 
 try {
@@ -468,8 +471,8 @@ try {
   console.log(`total created: ${total_created}`)
   console.log(`total created without program: ${total_created - program_size}`)
   console.log(`total deleted: ${total_deleted}`)
-  console.log(`max depth: ${max_allocated}`)
-  console.log(`max depth without program: ${max_allocated - program_size}`)
+  console.log(`max depth: ${peak_live}`)
+  console.log(`max depth without program: ${peak_live - program_size}`)
   console.log(`max ref holders: ${max_ref_holders}`)
 } catch (e) {
   console.log(e)

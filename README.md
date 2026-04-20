@@ -25,8 +25,13 @@ sequentially, one after another, each at a numeric index. There is no
 separation into stack and heap.
 
 `push` places a new object at the next available index.
-`pop` nulls a slot and calls `trim()` which shrinks the array length by
-removing any trailing nulls, keeping the `head()` operation O(1).
+`del(idx)` is the single deletion interface: it nulls the slot, increments
+`total_deleted`, and removes `idx` from `ref_holders`. All object deletions
+go through `del` so no call site can forget either side-effect.
+`pop` calls `del(head())` and then decrements `memory.length` directly — O(1),
+no scan needed, because `pop` always targets the last element so exactly one
+trailing null is created. `trim()` is only called inside `compact`, where the
+move phase can leave multiple trailing nulls.
 
 ### Objects
 
@@ -148,22 +153,22 @@ beyond the inline compact call itself.
 There are two trigger sites, both identified by the structure of the EO
 evaluation model:
 
-**`add_phi_point(add, value, scope)`** — called inside `dataize` each time a
+**`gc_phi(gc_enabled, value, scope)`** — called inside `dataize` each time a
 `φ` attribute is resolved and the result Formation is obtained. If there is a
 gap between `scope` (the last known live boundary) and `value` (the index of
 the new result), objects in `[scope+1, value]` may be garbage. It runs:
 
 ```
-mark_rec(value, scope)            // mark live objects reachable from 'value'
-value = compact(scope+1, value, value)  // compact, remap caller's pivot
+mark_phi(value, scope)                 // mark live objects reachable from 'value'
+value = compact(scope+1, value, value) // compact, remap caller's pivot
 ```
 
-**`add_disp_point(from, phi)`** — called inside `morph` after a Dispatch
+**`gc_disp(from, phi)`** — called inside `morph` after a Dispatch
 resolves through `φ`. It marks and compacts the range `[from, phi]`:
 
 ```
-mark_disps(from, from, phi)  // mark live objects reachable from 'from'
-mark_disps(phi,  from, phi)  // mark live objects reachable from 'phi'
+mark_disp(from, from, phi)  // mark live objects reachable from 'from'
+mark_disp(phi,  from, phi)  // mark live objects reachable from 'phi'
 return compact(from, phi, phi)
 ```
 
@@ -186,11 +191,11 @@ const mark = (index, in_range, recurse) => {
 set, else `xi`, else nothing. Plain `value` references (pointing to
 program-level objects that never move) are not followed during marking.
 
-`mark_disps(start, from, to)` — DFS from `start`, follows refs in `[from, to]`.
-Called twice by `add_disp_point` to seed from both endpoints of the range.
+`mark_disp(start, from, to)` — DFS from `start`, follows refs in `[from, to]`.
+Called twice by `gc_disp` to seed from both endpoints of the range.
 
-`mark_rec(index, scope)` — DFS from `index`, follows refs strictly within
-`(scope, last_phi)`. `last_phi` is a global watermark tracking the highest
+`mark_phi(index, scope)` — DFS from `index`, follows refs strictly within
+`(scope, phi_watermark)`. `phi_watermark` is a global watermark tracking the highest
 phi-point index ever seen, preventing nested GC from re-collecting objects
 still live in an outer GC scope.
 
@@ -205,21 +210,20 @@ to its new position.
 #### Sub-phase 1 — Plan (forwarding pointers)
 
 ```
-new_idx = from
-advance new_idx past leading in-place live objects, clearing their 'stay' flag
-if new_idx > end: nothing to do, return pivot unchanged
+cursor = from
+advance cursor past leading in-place live objects, clearing their 'stay' flag
+if cursor > end: nothing to do, return pivot unchanged
 
-first_dest = new_idx
-dest = new_idx
-for i = new_idx .. end:
+first_dest = cursor
+dest = cursor
+for i = cursor .. end:
   if memory[i] is null: skip
   if memory[i].stay:
     memory[i].stay = null
     memory[i].fwd = dest   // record destination on the object itself
     dest++
   else:
-    memory[i] = null       // delete garbage
-    total_deleted++
+    del(i)                 // null slot, increment total_deleted, remove from ref_holders
 ```
 
 After this sub-phase: live objects know their destination via `obj.fwd`. Garbage
@@ -245,10 +249,10 @@ them and rewrite every attribute reference through `r`:
 
 ```
 for i = from .. end:
-  if memory[i] != null: update_obj_refs(memory[i], r)
+  if memory[i] != null: remap_refs(memory[i], r)
 ```
 
-`update_obj_refs` rewrites `cache`, `xi`, and `value` fields of each attribute.
+`remap_refs` rewrites `cache`, `xi`, and `value` fields of each attribute.
 It only performs the rewrite when the value actually changes (`r(old) != old`),
 and when it does, it also adds that attribute name to `obj.written_attrs` — so
 future GC passes know to re-check that attribute when the object is outside the
@@ -274,10 +278,10 @@ attribute of every ref_holder object (which could be large), only the specific
 attributes that were ever explicitly written (via SET, cache, or copy) are
 checked.
 
-Finally, remap `last_phi` and compute the return value:
+Finally, remap `phi_watermark` and compute the return value:
 
 ```
-last_phi = r(last_phi)
+phi_watermark = r(phi_watermark)
 result = r(pivot)
 ```
 
@@ -450,7 +454,7 @@ dramatically reduces the size of the set that needs iterating.
 
 ### Mark Phase — Iterative DFS
 
-The recursive `mark_disps` / `mark_rec` DFS in JS becomes an iterative DFS
+The recursive `mark_disp` / `mark_phi` DFS in JS becomes an iterative DFS
 using a pre-allocated `Vec<u32>` worklist in Rust, eliminating call stack
 overhead and stack overflow risk for deep object graphs:
 
@@ -472,8 +476,8 @@ fn mark(seeds: &[u32], in_range: impl Fn(u32) -> bool, memory: &mut [Object]) {
 
 ### Generational GC (Future Work)
 
-The current design already behaves generationally in practice: `add_phi_point`
-and `add_disp_point` compact small, recently-allocated windows of memory.
+The current design already behaves generationally in practice: `gc_phi`
+and `gc_disp` compact small, recently-allocated windows of memory.
 Old objects at low indices are rarely inside a compact range.
 
 A formal generational boundary would divide memory into a young region (recent
