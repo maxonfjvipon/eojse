@@ -17,14 +17,12 @@ const {
   LAMBDA
 } = require('./helpers.js');
 
-let program_size = 0, peak_live = 0, total_created = 0, total_deleted = 0, max_ref_holders = 0
+let program_size = 0, peak_live = 0, total_created = 0, total_deleted = 0, max_ref_holders = 0, live_count = 0
 
 const push = (obj) => {
   memory.push(obj)
   ++total_created
-  if (memory_size() > peak_live) {
-    peak_live = memory_size()
-  }
+  if (++live_count > peak_live) peak_live = live_count
 }
 
 const trim = () => {
@@ -34,6 +32,7 @@ const trim = () => {
 const del = (idx) => {
   memory[idx] = null
   ++total_deleted
+  --live_count
   ref_holders.delete(idx)
 }
 
@@ -41,8 +40,6 @@ const pop = () => {
   del(head())
   memory.length--
 }
-
-const memory_size = () => memory.filter(x => x != null).length;
 
 const head = () => {
   if (memory.length === 0) throw new Error("Can't get head from empty memory")
@@ -94,6 +91,7 @@ const compact = (from, to, pivot) => {
   }
 
   const r = (idx) => {
+    if (idx < first_dest || idx > end) return idx
     const obj = memory[idx]
     return (obj != null && obj.fwd != null) ? obj.fwd : idx
   }
@@ -459,9 +457,10 @@ const dataize = (index, scope = program_size - 1, gc_enabled = GC_ENABLED_DEFAUL
 
 // OBJECTS
 
-program_size = memory_size()
-peak_live = memory_size()
-total_created = memory_size()
+program_size = memory.length
+live_count = memory.length
+peak_live = memory.length
+total_created = memory.length
 
 try {
   const res = bytesOf.bytes(dataize(0, head(), true)).asNumber()

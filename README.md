@@ -26,8 +26,11 @@ separation into stack and heap.
 
 `push` places a new object at the next available index.
 `del(idx)` is the single deletion interface: it nulls the slot, increments
-`total_deleted`, and removes `idx` from `ref_holders`. All object deletions
-go through `del` so no call site can forget either side-effect.
+`total_deleted`, decrements `live_count`, and removes `idx` from `ref_holders`.
+All object deletions go through `del` so no call site can forget any side-effect.
+`live_count` is an O(1) integer counter of currently live objects; `push`
+increments it and `del` decrements it, replacing the former O(n) `memory_size()`
+scan that previously ran on every push.
 `pop` calls `del(head())` and then decrements `memory.length` directly — O(1),
 no scan needed, because `pop` always targets the last element so exactly one
 trailing null is created. `trim()` is only called inside `compact`, where the
@@ -234,13 +237,17 @@ The key design choice is storing the forwarding pointer **on the object itself**
 
 ```javascript
 const r = (idx) => {
+  if (idx < first_dest || idx > end) return idx
   const obj = memory[idx]
   return (obj != null && obj.fwd != null) ? obj.fwd : idx
 }
 ```
 
-One field access, no hashing, no Map lookup. Since objects have not moved yet,
-`memory[idx]` still holds the object at its old position during sub-phase 2.
+The bounds check short-circuits before touching memory for any ref outside
+`[first_dest, end]` — the moving zone. Most refs point to program-level objects
+or objects above `end`, so the early return fires for the majority of calls.
+Since objects have not moved yet, `memory[idx]` still holds the object at its
+old position during sub-phase 2.
 
 #### Sub-phase 2 — Update References
 
