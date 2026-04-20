@@ -1,8 +1,6 @@
 const REMOVE_UNNECESSARY = true
 const USE_CACHE = true
 const COPY_ON_APPLICATION = false
-const USE_PHI_POINTS = true
-const REMOVE_ON_POINTS = true
 const WITH_PHI_POINTS_DEFAULT = false
 const HIDE_XI = false
 
@@ -13,7 +11,7 @@ const DELTA = 'Δ'
 const RHO = 'ρ'
 const LAMBDA = 'λ'
 
-const memory = {}
+const memory = []
 
 const print_object = (index) => {
   const obj = memory[index]
@@ -67,8 +65,10 @@ const print_object = (index) => {
 }
 
 const print_memory = (from = null) => {
-  Object.keys(memory).map(Number).filter((num) => !from || num >= from).forEach((idx) => {
-    console.log(print_object(idx))
+  memory.forEach((obj, idx) => {
+    if (obj != null && (!from || idx >= from)) {
+      console.log(print_object(idx))
+    }
   })
 }
 
@@ -192,8 +192,6 @@ module.exports = {
   REMOVE_UNNECESSARY,
   USE_CACHE,
   COPY_ON_APPLICATION,
-  USE_PHI_POINTS,
-  REMOVE_ON_POINTS,
   WITH_PHI_POINTS_DEFAULT,
   HIDE_XI,
   FORMATION,

@@ -4,8 +4,6 @@ const {
   REMOVE_UNNECESSARY,
   USE_CACHE,
   COPY_ON_APPLICATION,
-  USE_PHI_POINTS,
-  REMOVE_ON_POINTS,
   FORMATION,
   WITH_PHI_POINTS_DEFAULT,
   APPLICATION,
@@ -19,140 +17,161 @@ const {
   LAMBDA
 } = require('./helpers.js');
 
-let program_size, max_allocated, total_created, total_deleted = 0
-
-let cache = 0, max_cache = 0, caches = []
+let program_size = 0, max_allocated = 0, total_created = 0, total_deleted = 0, max_ref_holders = 0
 
 const push = (obj) => {
-  if (memory_size() === 0) {
-    memory[0] = obj
-  } else {
-    memory[head() + 1] = obj
-  }
+  memory.push(obj)
   ++total_created
   if (memory_size() > max_allocated) {
     max_allocated = memory_size()
   }
 }
 
-const pop = (idx = null) => {
-  idx = idx || head()
-  delete memory[idx]
-  ++total_deleted
+const trim = () => {
+  while (memory.length > 0 && memory[memory.length - 1] == null) memory.length--
 }
 
-const memory_size = () => Object.keys(memory).length;
+const pop = (idx = null) => {
+  idx = idx === null ? head() : idx
+  memory[idx] = null
+  ++total_deleted
+  trim()
+}
+
+const memory_size = () => memory.filter(x => x != null).length;
 
 const head = () => {
-  const keys = Object.keys(memory).map(Number)
-  if (keys.length === 0) {
-    throw new Error("Can't get head from empty memory")
-  }
-  return keys[keys.length - 1]
+  if (memory.length === 0) throw new Error("Can't get head from empty memory")
+  return memory.length - 1
 }
 
-const phi_points = []
+let last_phi = -1
+
+let ref_holders = new Set()
+
+const update_obj_refs = (obj, r) => {
+  Object.keys(obj.target).forEach((at) => {
+    const atr = obj.target[at]
+    if (atr.cache != null) {
+      const nc = r(atr.cache)
+      if (nc !== atr.cache) { atr.cache = nc; obj.written_attrs.add(at) }
+    } else if (atr.xi != null) {
+      const nv = r(atr.value), nx = r(atr.xi)
+      if (nv !== atr.value || nx !== atr.xi) { atr.value = nv; atr.xi = nx; obj.written_attrs.add(at) }
+    } else if (atr.value != null) {
+      const nv = r(atr.value)
+      if (nv !== atr.value) { atr.value = nv; obj.written_attrs.add(at) }
+    }
+  })
+}
+
+const compact = (from, to, pivot) => {
+  const end = Math.min(to, memory.length - 1)
+
+  let new_idx = from
+  while (new_idx <= end && memory[new_idx] != null && memory[new_idx].stay) {
+    memory[new_idx].stay = null
+    ++new_idx
+  }
+  if (new_idx > end) return pivot
+
+  const first_dest = new_idx
+  let dest = new_idx
+  for (let i = new_idx; i <= end; ++i) {
+    const obj = memory[i]
+    if (obj == null) continue
+    if (obj.stay) {
+      obj.stay = null
+      obj.fwd = dest
+      ++dest
+    } else {
+      memory[i] = null
+      ++total_deleted
+    }
+  }
+
+  const r = (idx) => {
+    const obj = memory[idx]
+    return (obj != null && obj.fwd != null) ? obj.fwd : idx
+  }
+
+  for (let i = from; i <= end; ++i) {
+    if (memory[i] != null) update_obj_refs(memory[i], r)
+  }
+
+  const next_holders = new Set()
+  for (const idx of ref_holders) {
+    const cur = r(idx)
+    const obj = memory[idx]
+    if (obj == null) continue
+    next_holders.add(cur)
+    if (idx < from || idx > end) {
+      for (const at of obj.written_attrs) {
+        const atr = obj.target[at]
+        if (atr == null) continue
+        if (atr.cache != null) atr.cache = r(atr.cache)
+        else if (atr.xi != null) { atr.value = r(atr.value); atr.xi = r(atr.xi) }
+        else if (atr.value != null) atr.value = r(atr.value)
+      }
+    }
+  }
+
+  ref_holders = next_holders
+  if (ref_holders.size > max_ref_holders) max_ref_holders = ref_holders.size
+  if (last_phi >= 0) last_phi = r(last_phi)
+  const result = r(pivot)
+
+  for (let i = first_dest; i <= end; ++i) {
+    const obj = memory[i]
+    if (obj == null || obj.fwd == null) continue
+    const dst = obj.fwd
+    memory[dst] = obj
+    if (dst !== i) memory[i] = null
+  }
+  trim()
+
+  return result
+}
 
 const add_phi_point = (add, value, scope) => {
-  add = USE_PHI_POINTS && add && (phi_points.length === 0 || value > phi_points[phi_points.length - 1])
+  add = add && (last_phi < 0 || value > last_phi)
   if (add) {
-    // console.log('add phi', scope, value, value - scope)
-    phi_points.push(value)
+    last_phi = value
     if (value - scope > 1) {
       mark_rec(value, scope)
-      if (REMOVE_ON_POINTS) {
-        update_cache()
-        for (let i = scope + 1; i <= value; ++i) {
-          if (!!memory[i]) {
-            if (!memory[i].stay) {
-              pop(i)
-            } else {
-              memory[i].stay = null
-            }
-          }
-        }
-      }
+      value = compact(scope + 1, value, value)
     }
   }
-  return add
+  return {add, value}
 }
 
-const update_cache = () => {
-  caches = []
-  if (cache > max_cache) {
-    max_cache = cache
-  }
-  cache = 0
-}
-
-const add_disp_point = (from, phi, after = false) => {
-  // console.log('add disp', from, phi, phi - from)
+const add_disp_point = (from, phi) => {
   mark_disps(from, from, phi)
-  if (after) {
-    mark_disps(phi, from, phi)
-  }
-  update_cache()
-  for (let i = from; i <= phi; ++i) {
-    if (!!memory[i]) {
-      if (!memory[i].stay) {
-        pop(i)
-      } else {
-        memory[i].stay = null
-      }
-    }
-  }
+  mark_disps(phi, from, phi)
+  return compact(from, phi, phi)
 }
 
-const mark_disps = (start, from, to) => {
-  memory[start].stay = true
-  const tgt = memory[start].target
-  Object.keys(tgt).forEach((at) => {
-    const atr = tgt[at]
-    let ref = null
-    if (atr.cache == null && atr.xi != null) {
-      ref = atr.xi
-    } else if (atr.cache != null) {
-      ref = atr.cache
-    }
-    if (ref != null && ref >= from && ref <= to && !memory[ref].stay) {
-      mark_disps(ref, from, to)
-    }
-  })
+const attr_ref = (atr) => {
+  if (atr.cache == null && atr.xi != null) return atr.xi
+  if (atr.cache != null) return atr.cache
+  return null
 }
 
-const mark_rec = (index, scope) => {
+const mark = (index, in_range, recurse) => {
   memory[index].stay = true
-  const tgt = memory[index].target
-  Object.keys(tgt).forEach((at) => {
-    const atr = tgt[at]
-    let ref = null
-    if (atr.cache == null && atr.xi != null) {
-      ref = atr.xi
-    } else if (atr.cache != null) {
-      ref = atr.cache
-    }
-    if (ref != null && ref > scope && ref < phi_points[phi_points.length - 1] && !memory[ref].stay) {
-      mark_rec(ref, scope)
+  Object.keys(memory[index].target).forEach((at) => {
+    const ref = attr_ref(memory[index].target[at])
+    if (ref != null && in_range(ref) && memory[ref] != null && !memory[ref].stay) {
+      recurse(ref)
     }
   })
 }
 
-const pop_phi_point = (end, scope) => {
-  // if (USE_PHI_POINTS && end) {
-  //   if (REMOVE_ON_POINTS) {
-  //     const until = phi_points.length > 1 ? phi_points[phi_points.length - 2] : scope
-  //     while (true) {
-  //       if (head() > until) {
-  //         pop()
-  //       } else {
-  //         break
-  //       }
-  //     }
-  //   }
-  //   // console.log('pop phi', phi_points[phi_points.length - 1])
-  //   phi_points.pop()
-  // }
-}
+const mark_disps = (start, from, to) =>
+  mark(start, (ref) => ref >= from && ref <= to, (ref) => mark_disps(ref, from, to))
+
+const mark_rec = (index, scope) =>
+  mark(index, (ref) => ref > scope && ref < last_phi, (ref) => mark_rec(ref, scope))
 
 const attr = (value, xi = null, cache = null) => ({value, xi, cache})
 
@@ -162,7 +181,8 @@ const object = (name, type, target, attr = null, value = null) => ({
   type,
   target,
   attr,
-  value
+  value,
+  written_attrs: new Set()
 })
 
 const formation = (name, attrs) => object(name, FORMATION, attrs)
@@ -254,8 +274,11 @@ const exec = (op) => {
   switch (op.type) {
     case COPY:
       const clone = structuredClone(memory[op.target])
-      push({...clone, name: '(copy ' + clone.name + ')', origin: op.target})
+      push({...clone, name: '(copy ' + clone.name + ')'})
       res = head()
+      for (const at of Object.keys(memory[res].target)) memory[res].written_attrs.add(at)
+      ref_holders.add(res)
+      if (ref_holders.size > max_ref_holders) max_ref_holders = ref_holders.size
       break
     case SET:
       tgt = memory[op.target].target
@@ -268,7 +291,10 @@ const exec = (op) => {
       }
 
       tgt[at] = op.value
+      memory[op.target].written_attrs.add(at)
       res = op.target
+      ref_holders.add(op.target)
+      if (ref_holders.size > max_ref_holders) max_ref_holders = ref_holders.size
       break
   }
   return res
@@ -330,17 +356,16 @@ const morph = (index, context, remove) => {
             at_i = morph(at.value, ctx)
 
             if (USE_CACHE && tgt[obj.attr].cache == null) {
-              cache++
-              caches.push(tgt_i)
               tgt[obj.attr].cache = at_i
+              memory[tgt_i].written_attrs.add(obj.attr)
+              ref_holders.add(tgt_i)
+              if (ref_holders.size > max_ref_holders) max_ref_holders = ref_holders.size
             }
           }
 
           if (at_i !== 0 && obj.attr !== RHO && !Object.hasOwn(memory[at_i].target, RHO)) {
             res = exec(copy(at_i))
             if (USE_CACHE) {
-              cache++
-              caches.push(res)
               res = exec(set(res, RHO, attr(tgt_i, null, tgt_i)))
             } else {
               res = exec(set(res, RHO, attr(tgt_i)))
@@ -350,11 +375,11 @@ const morph = (index, context, remove) => {
           }
         } else if (Object.hasOwn(tgt, PHI)) {
           push(dispatch(`${tgt_i}.${PHI}`, tgt_i, PHI))
-          const phi_i = morph(head(), tgt_i, true)
-          add_disp_point(tgt_i, phi_i)
+          let phi_i = morph(head(), tgt_i, true)
+          phi_i = add_disp_point(tgt_i, phi_i)
           push(dispatch(`${phi_i}.${obj.attr}`, phi_i, obj.attr))
           res = morph(head(), phi_i, true)
-          add_disp_point(tgt_i, res, true)
+          res = add_disp_point(tgt_i, res)
         } else if (Object.hasOwn(tgt, LAMBDA)) {
           const atom = tgt[LAMBDA].value
           if (!Object.hasOwn(atoms, atom)) {
@@ -363,7 +388,6 @@ const morph = (index, context, remove) => {
           const atom_res_i = morph(atoms[atom](tgt_i), tgt_i)
           push(dispatch(`${atom_res_i}.${obj.attr}`, atom_res_i, obj.attr))
           res = morph(head(), atom_res_i, true)
-          // add_disp_point(tgt_i, res, true)
         } else {
           throw new Error(`Bad dispatch on ${index}, can't go though ${obj.attr}, ${PHI} or ${LAMBDA}`)
         }
@@ -398,36 +422,35 @@ const morph = (index, context, remove) => {
   return res
 }
 
-const dataize = (index, scope = program_size - 1, with_scope = WITH_PHI_POINTS_DEFAULT) => {
+const dataize = (index, scope = program_size - 1, use_points = WITH_PHI_POINTS_DEFAULT) => {
   const obj = memory[index]
-  let data, started = false
+  let data
   switch (obj.type) {
     case FORMATION:
       if (Object.hasOwn(obj.target, DELTA)) {
         data = obj.target[DELTA].value
       } else if (Object.hasOwn(obj.target, PHI)) {
         push(dispatch(`${obj.name}.${PHI}`, index, PHI))
-        const phi_i = morph(head(), index, true)
-        started = add_phi_point(with_scope, phi_i, scope)
-        data = dataize(phi_i, scope, with_scope)
+        let phi_i = morph(head(), index, true)
+        phi_i = add_phi_point(use_points, phi_i, scope).value
+        data = dataize(phi_i, scope, use_points)
       } else if (Object.hasOwn(obj.target, LAMBDA)) {
         const atom = obj.target[LAMBDA].value
         if (!Object.hasOwn(atoms, atom)) {
           throw new Error(`Atom ${atom} does not exist`)
         }
-        const atom_res_i = morph(atoms[atom](index), index)
-        started = add_phi_point(with_scope, atom_res_i, scope)
-        data = dataize(atom_res_i, scope, with_scope)
+        let atom_res_i = morph(atoms[atom](index), index)
+        atom_res_i = add_phi_point(use_points, atom_res_i, scope).value
+        data = dataize(atom_res_i, scope, use_points)
       } else {
         throw new Error(`Can't dataize object ${index}, no ${DELTA}, no ${PHI}, no ${LAMBDA}`)
       }
       break
     default:
       const op_i = morph(index, index, true)
-      data = dataize(op_i, scope, with_scope)
+      data = dataize(op_i, scope, use_points)
       break
   }
-  pop_phi_point(started, scope)
   return data
 }
 
@@ -447,7 +470,7 @@ try {
   console.log(`total deleted: ${total_deleted}`)
   console.log(`max depth: ${max_allocated}`)
   console.log(`max depth without program: ${max_allocated - program_size}`)
-  console.log(`max set cache: ${max_cache}`)
+  console.log(`max ref holders: ${max_ref_holders}`)
 } catch (e) {
   console.log(e)
   print_memory()

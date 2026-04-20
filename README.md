@@ -20,18 +20,13 @@ pure object-oriented.
 
 ### Memory
 
-We assume that we work with memory as linear sequence of segments (cells)
-where we're laying out the object one after another.
-For now, we don't divide the memory into stack and heap.
+Memory is a flat integer-indexed array (`memory[]`). Objects are laid out
+sequentially, one after another, each at a numeric index. There is no
+separation into stack and heap.
 
-In this emulator the role of memory is performed by `memory` variable.
-It's a JS object where each key is an address of the object and value is object
-itself. Keys are started from `0` and incremented for each created object for
-convenience.
-
-If we say `push` - it means we place new object to the memory after the last
-one, if we say `pop` - it means we remove the last object from the memory,
-similar to stack
+`push` places a new object at the next available index.
+`pop` nulls a slot and calls `trim()` which shrinks the array length by
+removing any trailing nulls, keeping the `head()` operation O(1).
 
 ### Objects
 
@@ -41,34 +36,31 @@ EO objects stored in memory can be one of three types:
 - Application
 - Dispatch
 
-In this emulator each of the EO object is JS object of the following
-structure:
+Each object is a JS object of the following structure:
 
 ```javascript
 Object = {
-  name: String             // name of the object
-  type: String             // type of the object
-  target: Formation|Number // if 'type' is "formation" the 'target' is Formation
-                           // if 'type' is "application" or "dispatch" the target is Number -
-                           // address of the target object in memory
-  attr: String|Number|null // name or index of the attribute for Application or Dispatch
-                           // null if type is "formation"
-  value: Number|null       // adress of the object to set for Application
-                           // null if type is not "application"
+  name:          String,       // human-readable label for debugging
+  type:          String,       // "FRM" | "APP" | "DSP"
+  target:        Object|Number,// formation target (attrs map) or index of target object
+  attr:          String|Number|null, // attr name/index for Application or Dispatch
+  value:         Number|null,  // index of the value object for Application
+  written_attrs: Set<String>,  // attrs that were explicitly written or moved by GC
+  stay:          Boolean|null, // GC mark flag: true = live, null = dead
+  fwd:           Number|null,  // GC forwarding pointer: destination index during compact
 }
 
-// Formation is actually regular JS object where keys are EO object attributes
-// and values are Attributes
+// Formation target: a plain JS object where keys are EO attribute names
 Formation = {
-  "attr1": Attribute
-  "attr2": Attribute
+  "attr1": Attribute,
+  "attr2": Attribute,
   ...
 }
 
 Attribute = {
-  value: Number // address to the object in memory
-  xi: Number|null // context
-  cache: Number|null // cache
+  value: Number,      // index of the referenced object in memory
+  xi:    Number|null, // context index (when context differs from the object owning this attr)
+  cache: Number|null, // cached result of dispatching this attr (set after first resolution)
 }
 ```
 
@@ -84,240 +76,429 @@ The `memory` for that program looks like this (fields with `null` are ignored):
 
 ```javascript
 {
-  0: {name: "Q", type: "formation", target: {"foo": {value: 1}}},
-  1: {name: "foo", type: "formation", target: {"@": {value: 2}, "x": {value: 5}}},
-  2: {name: "$.x Q.y", type: "application", target: 3, attr: 0, value: 4},
-  3: {name: "$.x", type: "dispatch", target: -1, attr: "x"},
-  4: {name: "Q.y", type: "dispatch", target: 0, attr: "y"},
-  5: {name: "x", type: "formation", target: {}}
+  0: {name: "Q",      type: "FRM", target: {"foo": {value: 1}}},
+  1: {name: "foo",    type: "FRM", target: {"@": {value: 2}, "x": {value: 5}}},
+  2: {name: "$.x Q.y",type: "APP", target: 3, attr: 0, value: 4},
+  3: {name: "$.x",    type: "DSP", target: -1, attr: "x"},
+  4: {name: "Q.y",    type: "DSP", target: 0,  attr: "y"},
+  5: {name: "x",      type: "FRM", target: {}}
 }
 ```
 
-As you see, each object has rigid structure so we may definitely say what size
-in bytes it has. It may be useful for further implementations.
+As you see, each object has a rigid structure so we may definitely say what size
+in bytes it has. This is important for the future Rust implementation.
 
 ### Dataization
 
-The objects by themselves are not interested until they contain some data
-which we want to get as a result of program execution. Dataization is the core
-process in EOLANG which allows to extract the data from the program. Data in
-EOLANG is a sequence of bytes. Bytes can be attached only to the special `Δ`
-attribute (or asset) of Formation. This is how data is stored in current
-implementation:
+Dataization is the core process in EOLANG which extracts raw byte data from
+the program. Data in EOLANG is a sequence of bytes attached to the special `Δ`
+attribute of a Formation:
 
 ```javascript
-42: {name: "?", type: "formation", "target": {"Δ": {value: ['0x00', '0x01', ..., '0x10']}}}
+42: {name: "?", type: "FRM", target: {"Δ": {value: [0x00, 0x01, ..., 0x10]}}}
 ```
 
-As you see the data can be extracted only from Formation which contains `Δ`
-asset.
+Dataization of a Formation:
 
-1. If `Δ` asset is absent, first we check if Formation contains `φ` attribute
-   and if so, we push to the memory new object which is dispatch of `φ`
-   attribute from current formation.
-2. If `φ` is also absent, we check if Formation contains `λ` asset and if so,
-   we execute atom which is attached to this `λ` asset.
-3. If `λ` is also absent - dataization fails.
+1. If `Δ` is present — return its byte array directly.
+2. If `φ` is present — dispatch `φ`, get a new Formation, dataize it recursively.
+3. If `λ` is present — execute the named atom, get a result Formation, dataize it.
+4. Otherwise — throw an error.
 
-In both successful cases we get new object pushed in `memory`. Then we try to
-dataize it again. But it's not guaranteed that we get Formation returned from
-atom. But how to extract data from Application or dispatch? We should bring
-them to Formations first, and they try to find `Δ` asset again.
+Dataization of a Dispatch or Application first morphs it to a Formation, then
+applies the rules above.
 
 ### Morphing
 
-Morphing is the process of converting any object to Formation. For more
-details read this (link to phi paper). Morphing of Formation returns Formation
-itself. Morphing of Dispatch and Application in most cases pushes new objects
-to `memory` because it requires nested morphing operations.
+Morphing converts any object to a Formation. Morphing a Formation returns it
+unchanged. Morphing a Dispatch resolves the target and attribute, possibly
+copying the resolved Formation and attaching `ρ` (parent context). Morphing an
+Application resolves the target, then sets the specified attribute on it.
 
 ### Copying
 
-The only way a new object can be pushed to the `memory` is via `copy` operation.
-The only Formation can be the argument of copy operation. The `copy` operation
-is executed only during morphing of Dispatch. The `copy` operation in current
-implementation has one significant difference from `φ` calculus and java
-implementation: we don't make a deep copy of an object.
+When morphing a Dispatch resolves an attribute to a Formation that does not
+already have `ρ` set, a shallow copy of that Formation is made and `ρ` is
+attached to the copy. Attributes inside the Formation are stored as index
+references, so copying an object does not recursively copy nested objects — only
+the top-level attribute map is cloned, with all attribute values remaining as
+index references to existing memory slots.
 
-Consider this example in `φ` calculus:
+### Caching
+
+After a Dispatch resolves an attribute for the first time, the result index is
+stored in `attr.cache`. Subsequent dispatches of the same attribute on the same
+object return the cached index directly, skipping re-morphing. The object that
+holds the cache entry is added to `ref_holders` and the specific attribute name
+is added to its `written_attrs` so the GC can update the cached index if the
+referenced object moves.
+
+---
+
+## Garbage Collection
+
+During dataization, new objects are pushed to memory continuously. Objects
+become unreachable once the dataization step that created them completes.
+The emulator uses an inline **mark-compact** GC triggered at specific points
+during evaluation. There is no separate GC thread or stop-the-world pause
+beyond the inline compact call itself.
+
+### GC Trigger Points
+
+There are two trigger sites, both identified by the structure of the EO
+evaluation model:
+
+**`add_phi_point(add, value, scope)`** — called inside `dataize` each time a
+`φ` attribute is resolved and the result Formation is obtained. If there is a
+gap between `scope` (the last known live boundary) and `value` (the index of
+the new result), objects in `[scope+1, value]` may be garbage. It runs:
 
 ```
-{[ x -> [ y -> [ D> 01- ] ], @ -> Q.x.y ]}
+mark_rec(value, scope)            // mark live objects reachable from 'value'
+value = compact(scope+1, value, value)  // compact, remap caller's pivot
 ```
 
-During dataization of this program we go through such steps:
+**`add_disp_point(from, phi)`** — called inside `morph` after a Dispatch
+resolves through `φ`. It marks and compacts the range `[from, phi]`:
 
 ```
-   {[ x -> [ y -> [ D> 01- ], z -> [] ], @ -> Q.x.y ]} =>
-=> {[ x -> [ y -> [ D> 01- ], z -> [] ], @ -> [ x -> [ y -> [ D> 01- ], z -> [] ] ].x.y ]} =>
-=> {[ x -> [ y -> [ D> 01- ], z -> [] ], @ -> [ y -> [ D> 01- ], ^ -> ... ].y ]} =>
-=> {[ x -> [ y -> [ D> 01- ], z -> [] ], @ -> [ D> 01-, ^ -> ... ] ]} =>
-=> 01-
+mark_disps(from, from, phi)  // mark live objects reachable from 'from'
+mark_disps(phi,  from, phi)  // mark live objects reachable from 'phi'
+return compact(from, phi, phi)
 ```
 
-As you maybe see, when we copy the object attached to `x` attribute, we copy
-all the nested attributes: `y` and `z`. The same happens in the java
-implementation.
+### Mark Phase
 
-In current implementation attributes in formations are attached via links
-(addresses in `memory`), so we are able not to copy entire objects.
-_In future versions we may think about even lighter coping._
-
-Consider this example in current implementation:
+Two marking functions share a single `mark(index, in_range, recurse)` helper:
 
 ```javascript
-// [] > foo
-//   [] > x
-{
-  0: {name: "Q", type: "formation", target: {"foo": {value: 1}}},
-  1: {name: "foo", type: "formation", target: {"x": {value: 2}}},
-  2: {name: "x", type: "formation", target: {}}
+const mark = (index, in_range, recurse) => {
+  memory[index].stay = true
+  Object.keys(memory[index].target).forEach((at) => {
+    const ref = attr_ref(memory[index].target[at])   // cache ?? xi ?? null
+    if (ref != null && in_range(ref) && memory[ref] != null && !memory[ref].stay)
+      recurse(ref)
+  })
 }
 ```
 
-If we need to copy `foo` object, we don't need to copy the object `x`:
+`attr_ref` picks the "real" outgoing reference for an attribute: `cache` if
+set, else `xi`, else nothing. Plain `value` references (pointing to
+program-level objects that never move) are not followed during marking.
+
+`mark_disps(start, from, to)` — DFS from `start`, follows refs in `[from, to]`.
+Called twice by `add_disp_point` to seed from both endpoints of the range.
+
+`mark_rec(index, scope)` — DFS from `index`, follows refs strictly within
+`(scope, last_phi)`. `last_phi` is a global watermark tracking the highest
+phi-point index ever seen, preventing nested GC from re-collecting objects
+still live in an outer GC scope.
+
+After marking: every live object in the range has `stay = true`. Dead objects
+have `stay = null/false`.
+
+### Compact Phase
+
+`compact(from, to, pivot)` runs in three sub-phases and returns `pivot` remapped
+to its new position.
+
+#### Sub-phase 1 — Plan (forwarding pointers)
+
+```
+new_idx = from
+advance new_idx past leading in-place live objects, clearing their 'stay' flag
+if new_idx > end: nothing to do, return pivot unchanged
+
+first_dest = new_idx
+dest = new_idx
+for i = new_idx .. end:
+  if memory[i] is null: skip
+  if memory[i].stay:
+    memory[i].stay = null
+    memory[i].fwd = dest   // record destination on the object itself
+    dest++
+  else:
+    memory[i] = null       // delete garbage
+    total_deleted++
+```
+
+After this sub-phase: live objects know their destination via `obj.fwd`. Garbage
+slots are null. **No object has moved yet.**
+
+The key design choice is storing the forwarding pointer **on the object itself**
+(`obj.fwd`) rather than in a separate `Map`. This means the remap function is:
 
 ```javascript
-{
-  0: {name: "Q", type: "formation", target: {"foo": {value: 1}}},
-  1: {name: "foo", type: "formation", target: {"x": {value: 2}}},
-  2: {name: "x", type: "formation", target: {}}
-  3: {name: "foo'", type: "formation", target: {"x": {value: 2}}},
+const r = (idx) => {
+  const obj = memory[idx]
+  return (obj != null && obj.fwd != null) ? obj.fwd : idx
 }
 ```
 
-### Clearing
+One field access, no hashing, no Map lookup. Since objects have not moved yet,
+`memory[idx]` still holds the object at its old position during sub-phase 2.
 
-During program dataization new objects are pushed to the `memory`. At some
-point of time they become unnecessary for future calculations, and we should
-remove them.
+#### Sub-phase 2 — Update References
 
-The main question - when and where we can stop the calculations and try to
-clear unnecessary objects. (**linear objects arrangement???**)
+All live objects inside `[from, end]` are still at their old positions. Scan
+them and rewrite every attribute reference through `r`:
 
-#### Situation 1.
-
-When the global dataization process reaches the Formation (let's call it
-`O1`), it checks if the `O1` has `Δ` asset. If it does not - the `φ` attribute
-is taken from the `O1`. This `01.φ` dispatch leads to creating some amount of
-new objects pushed to `memory`. At some moment we reach some Formation `O2`
-which is actually attached to the `φ` attribute of `O1`. Then dataization
-process tries to take `Δ` asset from `O1`:
-
-Consider this example before dataization of `O1`
-
-```javascript
-...
-10: {name: 'O1', type: 'formation', target: {'φ': {value: 8, }}} // O1
+```
+for i = from .. end:
+  if memory[i] != null: update_obj_refs(memory[i], r)
 ```
 
-This is how `memory` looks like after taking `φ` attribute from `O1`:
+`update_obj_refs` rewrites `cache`, `xi`, and `value` fields of each attribute.
+It only performs the rewrite when the value actually changes (`r(old) != old`),
+and when it does, it also adds that attribute name to `obj.written_attrs` — so
+future GC passes know to re-check that attribute when the object is outside the
+compact range.
 
-```javascript
-...
-10: {name: 'O1', type: 'formation', target: {'φ': {value: 8, cache: 15 }}} // O1
-...
-13: {name: 'O3', type: 'formation', target: {...}}
-...
-15: {name: 'O2', type: 'formation', target: {'φ': {value: 5}, 'ρ': {value: 13}}} // O2
+Then handle **objects outside `[from, end]`** that hold refs into the range.
+These are tracked in `ref_holders`. For each:
+
+```
+for idx in ref_holders:
+  cur = r(idx)                   // new position of this ref_holder object
+  obj = memory[idx]              // object is still at old position
+  if obj is null: skip (was garbage-collected)
+  next_holders.add(cur)
+  if idx is outside [from, end]:
+    for at in obj.written_attrs: // only check attrs we know were written
+      update attr obj.target[at] through r
+ref_holders = next_holders
 ```
 
-As you see taking `φ` attribute from `O1` led to pushing 5 objects to the
-`memory`. Objects `10`, `13` and `15` are connected with each other so we can't
-delete them. Other objects can be painlessly removed. Next time, when we
-take next `φ` attribute from `O2` and get new Formation `O3`, we get next set
-of objects that can be deleted, maybe including the objects from previous set:
-`10`, `13` or `15`.
+Using `written_attrs` here is the key optimization: instead of checking every
+attribute of every ref_holder object (which could be large), only the specific
+attributes that were ever explicitly written (via SET, cache, or copy) are
+checked.
 
-So, each time when we see the situation when we need go though `φ`:
-1. we remember the address of the object, we need to take `φ` attribute from,
-   e.g. `10` for `O1`.
-2. when we get the `O2`, we remember its address, e.g. `15`.
-3. we're going though memory from start to the end and check what objects are
-   not connected with result `O2`.
-4. we mark such object as `to-be-removed`
-5. remove them somehow. In current implementation we just do
-   `delete memory[index]`. In more or less real example with real memory we
-   should do via memory shifting which is more complicated task
+Finally, remap `last_phi` and compute the return value:
 
-#### Situation 2
-
-**The second case is not tested and implemented yet.**
-
-It's similar to the first one, but we remember addresses when we need to go
-through `λ`.
-
-#### Situation 3
-
-**The third case is not tested and implemented yet.**
-
-There are other dataization processes besides the global one - inside atoms.
-This situation is more complex because scope where we can mark and delete
-object is limited.
-
-Consider this example:
-
-```javascript
-10: {name: 'O1', type: 'formation', target: {'λ': {value: 'L_atom_foo'}}}
+```
+last_phi = r(last_phi)
+result = r(pivot)
 ```
 
-We're trying to dataize `O1`. We start executing atom `L_atom_foo`. During its
-execution new objects are pushed to the `memory`. And at some moment atom
-starts inner dataization of some object, e.g. `O2`:
+#### Sub-phase 3 — Move
 
-```javascript
-10: {name: 'O1', type: 'formation', target: {'λ': {value: 'L_atom_foo'}}} // here atom starts
-...
-15: {name: 'O2', type: 'formation', target: {...}} // atoms dataizes this object
+Now physically move objects to their planned destinations:
+
+```
+for i = first_dest .. end:
+  obj = memory[i]
+  if obj is null or obj.fwd is null: skip
+  dst = obj.fwd
+  memory[dst] = obj
+  if dst != i: memory[i] = null
+trim()
 ```
 
-Similar to case 1 or 2, during the dataization we can go though `φ` or `λ`
-attributes for a several times. We also remembers the addresses of specified
-objects, but marking and removing a bit complicated, because other objects
-outside of atom scope may refer to these `to-be-removed` objects.
+Scanning left-to-right is safe because destinations are always ≤ sources
+(compacting leftward). A source is never overwritten before it is read.
 
-```javascript
-7: {name: 'O0', type: 'formation', target: {'x': {value: 4, cache: 17}}}
-...
-10: {name: 'O1', type: 'formation', target: {'λ': {value: 'L_atom_foo'}}} // here atom starts
-...
-15: {name: 'O2', type: 'formation', target: {'φ': {value: 5, cache: 18}}} // atoms dataizes this object
-...
-17: {name: 'O4', type: 'formation', target: {...}}
-18: {name: 'O5', type: 'formation', target: {...}}
+`trim()` shrinks `memory.length` to remove trailing nulls, keeping `head()` O(1).
+
+`obj.fwd` is **not** cleared after the move. After the move, `obj` sits at
+`memory[dst]` and `obj.fwd == dst`. In any future compact, `r(dst)` reads
+`memory[dst].fwd == dst` and returns `dst` — identical to the result if `fwd`
+were null. If the object needs to move again in a future compact, sub-phase 1
+overwrites `fwd` with the new destination anyway.
+
+### ref_holders
+
+`ref_holders` is a `Set<index>` tracking every object anywhere in memory that
+holds dynamic references — references that might point into a future compact
+range. An object is added to `ref_holders` when:
+
+- A COPY is performed (the clone may hold refs inherited from the source)
+- A SET is executed on it
+- A cache entry is written into one of its attributes
+
+During each compact, `ref_holders` is rebuilt as `next_holders` with all
+indices remapped through `r`. Objects whose slots are null (garbage-collected
+since the last compact) are dropped automatically.
+
+`ref_holders` answers **who** to update during sub-phase 2. Without it, every
+compact would require a full scan of all memory to find outside objects with
+relevant refs — O(total\_memory) instead of O(|ref\_holders|).
+
+### written_attrs
+
+`written_attrs: Set<String>` is a field on every object. It records which
+specific attributes of that object were written or moved by the GC:
+
+| Event | Effect |
+|-------|--------|
+| `exec(SET)` on attr `a` | `obj.written_attrs.add(a)` |
+| Cache written for attr `a` | `obj.written_attrs.add(a)` |
+| `exec(COPY)` | clone inherits source's `written_attrs`; all cloned attr names added |
+| Range scan moves a ref in attr `a` | `obj.written_attrs.add(a)` |
+
+`written_attrs` answers **what** to update during the ref_holders loop in
+sub-phase 2. For an object with many attributes (only a few of which hold
+dynamic refs), iterating `written_attrs` is much cheaper than iterating all
+attributes.
+
+`ref_holders` and `written_attrs` are complementary, not alternatives:
+`ref_holders` finds the right objects, `written_attrs` updates only the right
+attributes inside each of those objects.
+
+### Statistics
+
+After each program run the following counters are printed:
+
+| Stat | Meaning |
+|------|---------|
+| `original program size` | number of objects in memory before evaluation starts |
+| `total created` | total `push` calls during evaluation |
+| `total created without program` | above minus program size |
+| `total deleted` | objects nulled by GC (garbage) plus explicit `pop` calls |
+| `max depth` | peak live object count at any single moment |
+| `max depth without program` | above minus program size |
+| `max ref holders` | peak size of the `ref_holders` set |
+
+---
+
+## Future Rust Implementation
+
+This JS emulator is a proof-of-concept. The final implementation will be
+written in Rust and will operate directly on machine memory. The algorithmic
+choices made here were designed with that target in mind.
+
+### Memory Layout
+
+Memory is a contiguous `Vec<Object>` (or raw `*mut Object` pointer array with
+a length counter). Each `Object` is a fixed-size struct — EO's restrictions
+eliminate dynamic dispatch and variable-size layouts. Null slots are represented
+by a sentinel value (e.g. a dedicated tag bit or a `type` field value of 0)
+rather than `Option<Object>`, to avoid the extra indirection.
+
+`trim()` becomes a single store to the length counter — O(1) with no iteration.
+
+### Attributes
+
+In Rust, attribute names are compile-time integer offsets into a fixed-size
+attribute array embedded directly in the `Object` struct. There are no string
+keys and no hash lookups.
+
+```rust
+struct Attribute {
+    value: u32,        // index into memory array
+    xi:    u32,        // context index; u32::MAX = absent
+    cache: u32,        // cached result index; u32::MAX = absent
+}
+
+struct Object {
+    ty:            u8,         // Formation / Dispatch / Application
+    stay:          bool,       // GC mark flag
+    fwd:           u32,        // forwarding pointer; u32::MAX = absent
+    written_attrs: u64,        // bitmask: bit k = attr at offset k was written
+    attrs:         [Attribute; MAX_ATTRS],
+}
 ```
 
-Here `O2.φ` refers to `O5`, object `O4` is not connected with `O5` or `O2` but
-it's connected with `O0`, which is outside of scope of dataization inside
-atom (which is from `15` to `18`). So object `17` can't also be removed.
+### written_attrs as a Bitmask
 
-#### Situation 4
+In JS, `written_attrs` is a `Set<String>`. In Rust it becomes a `u64` bitmask
+where bit `k` corresponds to the attribute at offset `k`. This eliminates all
+heap allocation for this field.
 
-At some moment of time dataization process (global or not) reaches the
-formation with `Δ` asset and data will be extracted. At this point of time we
-also get some amount of unnecessary objects in `memory` which can be removed.
-If dataization is global - we can just remove all the objects added to
-`memory` during program execution, because end of dataization of the program
-means the end of the program. If dataization is not global, but inside atom,
-we can't just delete every object that was creating during the process. We can
-remove only objects which are not connected with objects outside the scope of
-current dataization process. _For now such removing is implemented only for
-global dataization._
+Setting a bit:
+```rust
+obj.written_attrs |= 1u64 << attr_offset;
+```
 
-#### Situation 5
+Iterating set bits (O(popcount), no branching per zero bit):
+```rust
+let mut mask = obj.written_attrs;
+while mask != 0 {
+    let k = mask.trailing_zeros() as usize;
+    mask &= mask - 1;   // clear lowest set bit
+    update_attr(&mut obj.attrs[k], r);
+}
+```
 
-_We believe there are much more cases in which we can stop the main dataization
-process and remove unnecessary object. Just need to find them_
+For objects with more than 64 attributes, extend to `u128` or `[u64; N]`.
 
-### How to play
+### Forwarding Pointer
+
+`fwd: u32` with `u32::MAX` as the null sentinel. No `Option<>` wrapper needed.
+The remap function is a single bounds check plus one array access:
+
+```rust
+fn r(idx: u32, first_dest: u32, end: u32, memory: &[Object]) -> u32 {
+    if idx < first_dest || idx > end { return idx; }
+    let fwd = memory[idx as usize].fwd;
+    if fwd != u32::MAX { fwd } else { idx }
+}
+```
+
+The bounds check `idx < first_dest || idx > end` short-circuits for the
+majority of references that point outside the compact range, avoiding even the
+array access for those cases.
+
+### ref_holders
+
+In Rust, `ref_holders` is a `Vec<u32>` — a flat array of memory indices,
+rebuilt after each compact (filter nulled entries, remap surviving indices).
+No hashing, no pointer chasing, cache-friendly sequential scan.
+
+For programs with very large `ref_holders`, a generational approach (see below)
+dramatically reduces the size of the set that needs iterating.
+
+### Mark Phase — Iterative DFS
+
+The recursive `mark_disps` / `mark_rec` DFS in JS becomes an iterative DFS
+using a pre-allocated `Vec<u32>` worklist in Rust, eliminating call stack
+overhead and stack overflow risk for deep object graphs:
+
+```rust
+fn mark(seeds: &[u32], in_range: impl Fn(u32) -> bool, memory: &mut [Object]) {
+    let mut stack: Vec<u32> = seeds.to_vec();
+    while let Some(idx) = stack.pop() {
+        let obj = &mut memory[idx as usize];
+        obj.stay = true;
+        for attr in obj.attrs.iter() {
+            let ref_ = effective_ref(attr);   // cache ?? xi ?? skip
+            if ref_ != u32::MAX && in_range(ref_) && !memory[ref_ as usize].stay {
+                stack.push(ref_);
+            }
+        }
+    }
+}
+```
+
+### Generational GC (Future Work)
+
+The current design already behaves generationally in practice: `add_phi_point`
+and `add_disp_point` compact small, recently-allocated windows of memory.
+Old objects at low indices are rarely inside a compact range.
+
+A formal generational boundary would divide memory into a young region (recent
+allocations) and an old region (stable objects). Most compacts would touch only
+the young region. Objects that survive several young-region compacts get
+promoted to the old region and are only collected during infrequent full
+compacts.
+
+This would reduce both the compact range size and the `ref_holders` iteration
+cost. The `written_attrs` bitmask already gives the per-attribute precision
+needed to efficiently maintain cross-generational references (old objects
+holding refs into the young region) — equivalent to a card table but at
+single-attribute granularity rather than 64-object-card granularity.
+
+---
+
+## How to play
 
 Test programs are placed inside `test-resources` directory.
 To disable or enable a specific program, you can comment/uncomment it
 in `test/test_programs.js` file.
 
 Then run `npm test`. It compiles EO program into JS, creates `temp` directory
-with your programs inside and run them (takes around 11 second per each
-program)
+with your programs inside and run them (takes around 11 seconds per each
+program).
 
 To see the full log and `memory` status for a specific program, e.g. `fibo`
 you can do:
@@ -326,11 +507,12 @@ you can do:
 node temp/fibo/.eoc/program.js
 ```
 
-The main `runtime` code is in `resources/program.js`.
+The main runtime code is in `resources/program.js`.
+Shared constants and utilities are in `resources/helpers.js`.
 
 To add new `eo-runtime` objects you should extend `resources/runtime.xsl`.
 
-### How to contribute
+## How to contribute
 
 You need `node` installed on your computer.
 

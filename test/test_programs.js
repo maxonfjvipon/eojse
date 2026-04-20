@@ -63,7 +63,7 @@ const programs = [
   // 'foo',
   // 'eleven',
   'rec',
-  // "fibo",
+  "fibo",
   // "self-ref",
   // "fibo_minus"
 ]
