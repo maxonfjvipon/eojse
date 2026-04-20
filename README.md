@@ -205,6 +205,12 @@ still live in an outer GC scope.
 After marking: every live object in the range has `stay = true`. Dead objects
 have `stay = null/false`.
 
+> **Future work:** `mark_phi` and `mark_disp` are currently recursive DFS. For
+> programs with deep object graphs this risks a JS stack overflow. Replacing the
+> recursion with an explicit iterative worklist (an array used as a stack) would
+> eliminate that risk and give more predictable performance. The Rust port already
+> plans this — see *Mark Phase — Iterative DFS* in the Rust section below.
+
 ### Compact Phase
 
 `compact(from, to, pivot)` runs in three sub-phases and returns `pivot` remapped
