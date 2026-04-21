@@ -6,14 +6,14 @@ which tries to map the object-oriented paradigm to imperative operations.
 ## Why it exists
 
 OOP is slow, pure OOP is even slower. Can it be faster? We're sure it can.
-The only way to make pure OOP language as fast as procedural one - impose
-restrictions on the language, which allow to present complicated manipulations
-with objects as set of imperative instructions and effectively store them in
+The only way to make a pure OOP language as fast as a procedural one is to impose
+restrictions on the language that allow presenting complicated manipulations
+with objects as a set of imperative instructions and effectively storing them in
 linear memory.
 
-We believe that EOLANG has such restrictions. On one hand, the language is
-quite simple and does not contain huge amount features which most famous OOP
-languages have (classes, types, mutability, etc.), on other hand, it's still
+We believe that EOLANG has such restrictions. On the one hand, the language is
+quite simple and does not contain many of the features most popular OOP
+languages have (classes, types, mutability, etc.), on the other hand, it's still
 pure object-oriented.
 
 ## The main idea and key concepts
@@ -27,12 +27,12 @@ separation into stack and heap.
 `push` places a new object at the next available index.
 `del(idx)` is the single deletion interface: it nulls the slot, increments
 `total_deleted`, decrements `live_count`, and removes `idx` from `ref_holders`.
-All object deletions go through `del` so no call site can forget any side-effect.
+All object deletions go through `del`, so no call site can forget any side-effect.
 `live_count` is an O(1) integer counter of currently live objects; `push`
 increments it and `del` decrements it, replacing the former O(n) `memory_size()`
 scan that previously ran on every push.
 `pop` calls `del(head())` and then decrements `memory.length` directly — O(1),
-no scan needed, because `pop` always targets the last element so exactly one
+no scan needed, because `pop` always targets the last element, so exactly one
 trailing null is created. `trim()` is only called inside `compact`, where the
 move phase can leave multiple trailing nulls.
 
@@ -93,7 +93,7 @@ The `memory` for that program looks like this (fields with `null` are ignored):
 }
 ```
 
-As you see, each object has a rigid structure so we may definitely say what size
+As you see, each object has a rigid structure, so we may definitely say what size
 in bytes it has. This is important for the future Rust implementation.
 
 ### Dataization
@@ -138,7 +138,7 @@ After a Dispatch resolves an attribute for the first time, the result index is
 stored in `attr.cache`. Subsequent dispatches of the same attribute on the same
 object return the cached index directly, skipping re-morphing. The object that
 holds the cache entry is added to `ref_holders` and the specific attribute name
-is added to its `written_attrs` so the GC can update the cached index if the
+is added to its `written_attrs`, so the GC can update the cached index if the
 referenced object moves.
 
 ---
@@ -364,7 +364,7 @@ attributes inside each of those objects.
 
 ### Statistics
 
-After each program run the following counters are printed:
+After each program run, the following counters are printed:
 
 | Stat | Meaning |
 |------|---------|
@@ -513,9 +513,9 @@ Test programs are placed inside `test-resources` directory.
 To disable or enable a specific program, you can comment/uncomment it
 in `test/test_programs.js` file.
 
-Then run `npm test`. It compiles EO program into JS, creates `temp` directory
-with your programs inside and run them (takes around 11 seconds per each
-program).
+Then run `npm test`. It compiles each EO program into JS and a DSL file, creates
+`temp` directory with your programs inside and runs them (takes around 11 seconds
+per program).
 
 To see the full log and `memory` status for a specific program, e.g. `fibo`
 you can do:
@@ -527,11 +527,11 @@ node temp/fibo/.eoc/program.js
 The main runtime code is in `resources/program.js`.
 Shared constants and utilities are in `resources/helpers.js`.
 
-To add new `eo-runtime` objects you should extend `resources/runtime.xsl`.
+To add new `eo-runtime` objects, you should extend `resources/runtime.xsl`.
 
 ## How to contribute
 
 You need `node` installed on your computer.
 
-Submit a PR with your changes. To avoid frustration please run `npm test`
+Submit a PR with your changes. To avoid frustration, please run `npm test`
 before sending. Make sure all the tests pass.
