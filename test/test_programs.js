@@ -101,6 +101,11 @@ describe('run programs', function () {
           input = out
           run(`xcop --fix ${out}`)
         })
+        const dslXsl = path.resolve(__dirname, '../resources', 'to-dsl.xsl')
+        const dslInput = output.replace('.xmir', `-${xsls.length - 2}.xmir`)
+        const dslOut = path.resolve(dir, `${name}.dsl`)
+        run(`java -jar ${saxon} -s:${dslInput} -xsl:${dslXsl} -o:${dslOut}`)
+
         const xml = fs.readFileSync(out)
         const js = parser.toJson(xml.toString(), {object: true})['object']['$t'].split('\n').map(txt => txt.trim()).join('\n')
 
