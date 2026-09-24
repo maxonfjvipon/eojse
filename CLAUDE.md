@@ -40,11 +40,13 @@ The final `program.js` is self-contained — it inlines the program objects and 
 
 **Memory** — flat integer-indexed array. Objects sit at sequential indices. `push` appends, `pop` removes the tail (O(1)), `del(idx)` is the single deletion interface (nulls slot, decrements `live_count`, removes from `ref_holders`), `trim()` shrinks trailing nulls after bulk deletes.
 
-**Object types** — every object is one of `FORMATION` (has a `target` attrs-map), `DISPATCH` (target index + attr name), or `APPLICATION` (target index + attr name + value index).
+**Object types** — every object is one of `FORMATION` (has a `target` attrs-map), `DISPATCH` (target index + attr name), `APPLICATION` (target index + attr name + value index), or `CONTEXT` (bare `$`; no fields; morph returns the runtime context).
 
-**`morph(index, context, remove)`** — converts any object to a Formation by resolving dispatches and applications recursively. This is the core evaluation step.
+**`morph(index, context, remove)`** — converts any object to a Formation by resolving dispatches, applications, and contexts. The core evaluation step. Implemented as a trampoline over a generator function `morph_g`: every sub-call is `yield morph_g(...)` and the driver loop owns the explicit work-stack, so no native call recursion. CTX is a leaf case — it returns the runtime context directly with no sub-call.
 
-**`dataize(index, scope, gc_enabled)`** — extracts raw bytes from an object. Calls `morph` internally, recurses through `φ` and `λ` attributes.
+**`dataize(index, scope, gc_enabled)`** — extracts raw bytes from an object. Calls `morph` internally and walks `φ` / `λ` attributes via a `while(true)` loop that updates `index` in place (all recursive paths in the JS shape were tail-recursive).
+
+**`needs_context(index)`** — checks whether a Dispatch/Application graph references context (`-1`). Iterative worklist over the (target, value) graph; short-circuits on the first `-1`.
 
 **`exec(op)`** — executes `COPY` or `SET` operations, updating `ref_holders` and `written_attrs`.
 
@@ -55,7 +57,7 @@ The GC is mark-compact, triggered inline at two sites:
 - **`gc_phi(gc_enabled, value, scope)`** — called in `dataize` after resolving `φ`. Runs `mark_phi` then `compact(scope+1, value, value)`.
 - **`gc_disp(from, phi)`** — called in `morph` after dispatching through `φ`. Runs `mark_disp` from both endpoints then `compact(from, phi, phi)`.
 
-**Mark** — `mark_phi` and `mark_disp` both delegate to `mark(index, in_range, recurse)`, a recursive DFS that sets `obj.stay = true` on live objects. `attr_ref` selects the effective outgoing ref per attribute (`cache` > `xi` > nothing).
+**Mark** — `mark_phi` and `mark_disp` both delegate to `mark(seed, in_range)`, an iterative DFS over an explicit worklist (a JS array used as a LIFO stack) that sets `obj.stay = true` on live objects. The loop guards against double-push by `continue`-ing when `obj.stay` is already set. `attr_ref` selects the effective outgoing ref per attribute (`cache` > `xi` > nothing).
 
 **Compact** (`compact(from, to, pivot)`) — three phases:
 1. **Plan**: advance `cursor` past in-place objects; set `obj.fwd = dest` on live objects; `del` garbage.

@@ -21,7 +21,7 @@
           <xsl:value-of select="@atom"/>
         </xsl:when>
         <xsl:when test="@value">
-          <xsl:value-of select="@value"/>
+          <xsl:value-of select="replace(@value, '-$', '')"/>
         </xsl:when>
         <xsl:when test="@cache">
           <xsl:value-of select="@id"/>
@@ -51,6 +51,11 @@
       </xsl:when>
       <xsl:otherwise>-1</xsl:otherwise>
     </xsl:choose>
+    <xsl:text>&#10;</xsl:text>
+  </xsl:template>
+  <xsl:template match="context">
+    <xsl:text>CTX </xsl:text>
+    <xsl:value-of select="@id"/>
     <xsl:text>&#10;</xsl:text>
   </xsl:template>
   <xsl:template match="application">

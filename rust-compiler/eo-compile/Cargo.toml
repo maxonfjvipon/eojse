@@ -1,0 +1,16 @@
+[package]
+name = "eo-compile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Ahead-of-time compiler from EO DSL to Rust source."
+
+[[bin]]
+name = "eo-compile"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+eo-rt = { path = "../eo-rt" }

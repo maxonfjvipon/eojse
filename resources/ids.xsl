@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" id="ids" version="2.0">
   <xsl:output encoding="UTF-8" method="xml"/>
-  <xsl:template match="formation|dispatch|application">
+  <xsl:template match="formation|dispatch|application|context">
     <xsl:variable name="position" select="count(preceding::*[name()!='void' and name()!='atom']) + count(ancestor::*[name()!='void' and name()!='atom'])"/>
     <xsl:copy>
       <!-- Copy existing attributes -->

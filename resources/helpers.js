@@ -4,7 +4,7 @@ const COPY_ON_APPLICATION = false
 const GC_ENABLED_DEFAULT = false
 const HIDE_XI = false
 
-const FORMATION = "FRM", DISPATCH = "DSP", APPLICATION = "APP", COPY = "CPY", SET = "SET"
+const FORMATION = "FRM", DISPATCH = "DSP", APPLICATION = "APP", CONTEXT = "CTX", COPY = "CPY", SET = "SET"
 
 const PHI = 'φ'
 const DELTA = 'Δ'
@@ -59,6 +59,9 @@ const print_object = (index) => {
         `${index}: `,
         `${obj.target}(${obj.attr}: ${obj.value})`,
       ].join('')
+      break
+    case CONTEXT:
+      res = `${index}: $`
       break
   }
   return res + ' // ' + obj.name
@@ -186,17 +189,16 @@ const conversion = function (bytes) {
 }
 
 module.exports = {
-  print_object,
   print_memory,
   bytesOf,
   REMOVE_UNNECESSARY,
   USE_CACHE,
   COPY_ON_APPLICATION,
   GC_ENABLED_DEFAULT,
-  HIDE_XI,
   FORMATION,
   APPLICATION,
   DISPATCH,
+  CONTEXT,
   COPY,
   SET,
   memory,

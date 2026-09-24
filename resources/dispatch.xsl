@@ -47,8 +47,7 @@
     </xsl:element>
   </xsl:template>
   <xsl:template match="o[@base='ξ']">
-    <xsl:element name="dispatch">
-      <xsl:attribute name="self"/>
+    <xsl:element name="context">
       <xsl:if test="@name">
         <xsl:attribute name="name" select="@name"/>
       </xsl:if>

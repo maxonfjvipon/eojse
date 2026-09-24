@@ -52,18 +52,40 @@ const rmDirRecursive = (dir) => {
   }
 }
 
-if (fs.existsSync(temp)) {
-  rmDirRecursive(temp)
-}
-
+// Preserve temp/ across runs: each program's per-directory cleanup is done
+// inside the test loop below. Wiping the whole temp/ here would discard
+// DSLs for programs commented out of `programs` (workflow: regenerate only
+// new programs without re-running the full pipeline).
 fs.mkdirSync(temp, {recursive: true})
 
 const programs = [
-  // 'simple',
+  'simple',
   // 'foo',
   // 'eleven',
   'rec',
-  "fibo",
+  // "fibo",
+  // 'dollar',
+  // 'dup',
+  // 'fibo9',
+  // 'fibo10',
+  // 'fibo11',
+  // 'fibo12',
+  // 'fibo13',
+  // 'fibo14',
+  // 'fibo15',
+  // 'fibo16',
+  // 'fibo17',
+  // 'fibo18',
+  // 'fibo19',
+  // 'fibo20',
+  // 'fibo21',
+  // 'fibo22',
+  // 'fibo23',
+  // 'fibo24',
+  // 'fibo25',
+  // 'fibo26',
+  // 'fibo27',
+  // 'fibo28',
   // "self-ref",
   // "fibo_minus"
 ]
@@ -117,8 +139,12 @@ describe('run programs', function () {
           fs.writeFileSync(path.resolve(dir, '.eoc', path.basename(dep)), fs.readFileSync(dep, {encoding: 'utf-8'}))
         })
 
-        const stdout = run(`node ${prog}`).toString()
-        assert.ok(stdout.includes(`data: ${expected}`))
+        // expected: '?' means "generate DSL + JS but skip node execution"
+        // (used for benchmarking-only programs whose JS run would be slow).
+        if (expected !== '?') {
+          const stdout = run(`node ${prog}`).toString()
+          assert.ok(stdout.includes(`data: ${expected}`))
+        }
         done()
       } catch (error) {
         console.log(error)

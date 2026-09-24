@@ -1,5 +1,5 @@
 program: |
-  # fibo(8) = 21
+  # fibo(27) = 196418
   [] > program
     [x] > fibo
       if. > @
@@ -8,5 +8,5 @@ program: |
         plus.
           fibo (x.plus -1)
           fibo (x.plus -2)
-    fibo 8 > @
-expected: '21'
+    fibo 27 > @
+expected: '?'

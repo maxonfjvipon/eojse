@@ -8,6 +8,7 @@ const {
   GC_ENABLED_DEFAULT,
   APPLICATION,
   DISPATCH,
+  CONTEXT,
   COPY,
   SET,
   memory,
@@ -18,6 +19,8 @@ const {
 } = require('./helpers.js');
 
 let program_size = 0, peak_live = 0, total_created = 0, total_deleted = 0, max_ref_holders = 0, live_count = 0
+let gc_phi_count = 0, gc_phi_reclaimed = 0
+let gc_disp_count = 0, gc_disp_reclaimed = 0
 
 const push = (obj) => {
   memory.push(obj)
@@ -140,7 +143,10 @@ const gc_phi = (gc_enabled, value, scope) => {
     phi_watermark = value
     if (value - scope > 1) {
       mark_phi(value, scope)
+      ++gc_phi_count
+      const before = live_count
       value = compact(scope + 1, value, value)
+      gc_phi_reclaimed += before - live_count
     }
   }
   return value
@@ -149,7 +155,11 @@ const gc_phi = (gc_enabled, value, scope) => {
 const gc_disp = (from, phi) => {
   mark_disp(from, from, phi)
   mark_disp(phi, from, phi)
-  return compact(from, phi, phi)
+  ++gc_disp_count
+  const before = live_count
+  const res = compact(from, phi, phi)
+  gc_disp_reclaimed += before - live_count
+  return res
 }
 
 const attr_ref = (atr) => {
@@ -158,21 +168,27 @@ const attr_ref = (atr) => {
   return null
 }
 
-const mark = (index, in_range, recurse) => {
-  memory[index].stay = true
-  Object.keys(memory[index].target).forEach((at) => {
-    const ref = attr_ref(memory[index].target[at])
-    if (ref != null && in_range(ref) && memory[ref] != null && !memory[ref].stay) {
-      recurse(ref)
-    }
-  })
+const mark = (seed, in_range) => {
+  const stack = [seed]
+  while (stack.length > 0) {
+    const index = stack.pop()
+    const obj = memory[index]
+    if (obj.stay) continue
+    obj.stay = true
+    Object.keys(obj.target).forEach((at) => {
+      const ref = attr_ref(obj.target[at])
+      if (ref != null && in_range(ref) && memory[ref] != null && !memory[ref].stay) {
+        stack.push(ref)
+      }
+    })
+  }
 }
 
 const mark_disp = (start, from, to) =>
-  mark(start, (ref) => ref >= from && ref <= to, (ref) => mark_disp(ref, from, to))
+  mark(start, (ref) => ref >= from && ref <= to)
 
 const mark_phi = (index, scope) =>
-  mark(index, (ref) => ref > scope && ref < phi_watermark, (ref) => mark_phi(ref, scope))
+  mark(index, (ref) => ref > scope && ref < phi_watermark)
 
 const attr = (value, xi = null, cache = null) => ({value, xi, cache})
 
@@ -191,6 +207,8 @@ const formation = (name, attrs) => object(name, FORMATION, attrs)
 const dispatch = (name, target, attr) => object(name, DISPATCH, target, attr)
 
 const application = (name, target, attr, value) => object(name, APPLICATION, target, attr, value)
+
+const context = (name) => object(name, CONTEXT, {})
 
 // OPERATIONS
 const operation = (type, target, attr = null, value = null) => ({type, target, attr, value})
@@ -302,29 +320,41 @@ const exec = (op) => {
 }
 
 const needs_context = (index) => {
-  const obj = memory[index]
-  let need
-  switch (obj.type) {
-    case FORMATION:
-      need = false
-      break
-    case DISPATCH:
-      need = obj.target === -1 || needs_context(obj.target)
-      break
-    case APPLICATION:
-      need = obj.target === -1 || obj.value === -1 || needs_context(obj.target) || needs_context(obj.value)
-      break
+  const stack = [index]
+  while (stack.length > 0) {
+    const obj = memory[stack.pop()]
+    switch (obj.type) {
+      case FORMATION:
+        break
+      case CONTEXT:
+        return true
+      case DISPATCH:
+        if (obj.target === -1) return true
+        stack.push(obj.target)
+        break
+      case APPLICATION:
+        if (obj.target === -1 || obj.value === -1) return true
+        stack.push(obj.target)
+        stack.push(obj.value)
+        break
+    }
   }
-  return need
+  return false
 }
 
-const morph = (index, context, remove) => {
+function* morph_g(index, context, remove) {
   const obj = memory[index]
   const clear = REMOVE_UNNECESSARY && remove
   let res, tgt_i, at
   switch (obj.type) {
     case FORMATION:
       res = index
+      break
+    case CONTEXT:
+      if (clear) {
+        pop()
+      }
+      res = context
       break
     case DISPATCH:
       if (clear) {
@@ -334,7 +364,7 @@ const morph = (index, context, remove) => {
       if (obj.target === -1) {
         tgt_i = context
       } else {
-        tgt_i = morph(obj.target, context)
+        tgt_i = yield morph_g(obj.target, context)
       }
       const tgt = memory[tgt_i].target
 
@@ -354,7 +384,7 @@ const morph = (index, context, remove) => {
             } else {
               ctx = tgt_i
             }
-            at_i = morph(at.value, ctx)
+            at_i = yield morph_g(at.value, ctx)
 
             if (USE_CACHE && tgt[obj.attr].cache == null) {
               tgt[obj.attr].cache = at_i
@@ -376,19 +406,19 @@ const morph = (index, context, remove) => {
           }
         } else if (Object.hasOwn(tgt, PHI)) {
           push(dispatch(`${tgt_i}.${PHI}`, tgt_i, PHI))
-          let phi_i = morph(head(), tgt_i, true)
+          let phi_i = yield morph_g(head(), tgt_i, true)
           phi_i = gc_disp(tgt_i, phi_i)
           push(dispatch(`${phi_i}.${obj.attr}`, phi_i, obj.attr))
-          res = morph(head(), phi_i, true)
+          res = yield morph_g(head(), phi_i, true)
           res = gc_disp(tgt_i, res)
         } else if (Object.hasOwn(tgt, LAMBDA)) {
           const atom = tgt[LAMBDA].value
           if (!Object.hasOwn(atoms, atom)) {
             throw new Error(`Atom ${atom} does not exist`)
           }
-          const atom_res_i = morph(atoms[atom](tgt_i), tgt_i)
+          const atom_res_i = yield morph_g(atoms[atom](tgt_i), tgt_i)
           push(dispatch(`${atom_res_i}.${obj.attr}`, atom_res_i, obj.attr))
-          res = morph(head(), atom_res_i, true)
+          res = yield morph_g(head(), atom_res_i, true)
         } else {
           throw new Error(`Bad dispatch on ${index}, can't go though ${obj.attr}, ${PHI} or ${LAMBDA}`)
         }
@@ -399,7 +429,7 @@ const morph = (index, context, remove) => {
         pop()
       }
 
-      tgt_i = morph(obj.target, context)
+      tgt_i = yield morph_g(obj.target, context)
 
       if (obj.value === -1) {
         at = attr(context)
@@ -423,36 +453,51 @@ const morph = (index, context, remove) => {
   return res
 }
 
-const dataize = (index, scope = program_size - 1, gc_enabled = GC_ENABLED_DEFAULT) => {
-  const obj = memory[index]
-  let data
-  switch (obj.type) {
-    case FORMATION:
-      if (Object.hasOwn(obj.target, DELTA)) {
-        data = obj.target[DELTA].value
-      } else if (Object.hasOwn(obj.target, PHI)) {
-        push(dispatch(`${obj.name}.${PHI}`, index, PHI))
-        let phi_i = morph(head(), index, true)
-        phi_i = gc_phi(gc_enabled, phi_i, scope)
-        data = dataize(phi_i, scope, gc_enabled)
-      } else if (Object.hasOwn(obj.target, LAMBDA)) {
-        const atom = obj.target[LAMBDA].value
-        if (!Object.hasOwn(atoms, atom)) {
-          throw new Error(`Atom ${atom} does not exist`)
-        }
-        let atom_res_i = morph(atoms[atom](index), index)
-        atom_res_i = gc_phi(gc_enabled, atom_res_i, scope)
-        data = dataize(atom_res_i, scope, gc_enabled)
-      } else {
-        throw new Error(`Can't dataize object ${index}, no ${DELTA}, no ${PHI}, no ${LAMBDA}`)
-      }
-      break
-    default:
-      const op_i = morph(index, index, true)
-      data = dataize(op_i, scope, gc_enabled)
-      break
+const morph = (index, context, remove) => {
+  const stack = [morph_g(index, context, remove)]
+  let value
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1]
+    const r = top.next(value)
+    if (r.done) {
+      value = r.value
+      stack.pop()
+    } else {
+      value = undefined
+      stack.push(r.value)
+    }
   }
-  return data
+  return value
+}
+
+const dataize = (index, scope = program_size - 1, gc_enabled = GC_ENABLED_DEFAULT) => {
+  while (true) {
+    const obj = memory[index]
+    if (obj.type !== FORMATION) {
+      const op_i = morph(index, index, true)
+      index = gc_phi(gc_enabled, op_i, scope)
+      continue
+    }
+    if (Object.hasOwn(obj.target, DELTA)) {
+      return obj.target[DELTA].value
+    }
+    if (Object.hasOwn(obj.target, PHI)) {
+      push(dispatch(`${obj.name}.${PHI}`, index, PHI))
+      const phi_i = morph(head(), index, true)
+      index = gc_phi(gc_enabled, phi_i, scope)
+      continue
+    }
+    if (Object.hasOwn(obj.target, LAMBDA)) {
+      const atom = obj.target[LAMBDA].value
+      if (!Object.hasOwn(atoms, atom)) {
+        throw new Error(`Atom ${atom} does not exist`)
+      }
+      const atom_res_i = morph(atoms[atom](index), index)
+      index = gc_phi(gc_enabled, atom_res_i, scope)
+      continue
+    }
+    throw new Error(`Can't dataize object ${index}, no ${DELTA}, no ${PHI}, no ${LAMBDA}`)
+  }
 }
 
 // OBJECTS
@@ -473,6 +518,8 @@ try {
   console.log(`max depth: ${peak_live}`)
   console.log(`max depth without program: ${peak_live - program_size}`)
   console.log(`max ref holders: ${max_ref_holders}`)
+  console.log(`gc_phi:  ${gc_phi_count} calls, ${gc_phi_reclaimed} reclaimed`)
+  console.log(`gc_disp: ${gc_disp_count} calls, ${gc_disp_reclaimed} reclaimed`)
 } catch (e) {
   console.log(e)
   print_memory()

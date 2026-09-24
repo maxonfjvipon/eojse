@@ -66,21 +66,31 @@
       </xsl:otherwise>
     </xsl:choose>
     <xsl:text>', </xsl:text>
-    <xsl:if test="@from">
-      <xsl:value-of select="@from"/>
-    </xsl:if>
-    <xsl:if test="@self">
-      <xsl:text>-1</xsl:text>
-    </xsl:if>
+    <xsl:choose>
+      <xsl:when test="@from">
+        <xsl:value-of select="@from"/>
+      </xsl:when>
+      <xsl:otherwise>
+        <xsl:text>-1</xsl:text>
+      </xsl:otherwise>
+    </xsl:choose>
     <xsl:text>, '</xsl:text>
-    <xsl:if test="@attr">
-      <xsl:value-of select="@attr"/>
-    </xsl:if>
-    <xsl:if test="@self">
-      <xsl:text>-1</xsl:text>
-    </xsl:if>
+    <xsl:value-of select="@attr"/>
     <xsl:text>'</xsl:text>
     <xsl:text>)) // </xsl:text>
+    <xsl:value-of select="@id"/>
+  </xsl:template>
+  <xsl:template match="context">
+    <xsl:text>push(context('</xsl:text>
+    <xsl:choose>
+      <xsl:when test="@name">
+        <xsl:value-of select="@name"/>
+      </xsl:when>
+      <xsl:otherwise>
+        <xsl:text>$</xsl:text>
+      </xsl:otherwise>
+    </xsl:choose>
+    <xsl:text>')) // </xsl:text>
     <xsl:value-of select="@id"/>
   </xsl:template>
   <xsl:template match="application">

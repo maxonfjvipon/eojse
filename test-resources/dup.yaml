@@ -1,0 +1,5 @@
+program: |
+  # Duplicated literals: arena dedup should fold them into one byte range.
+  [] > program
+    1.plus 1 > @
+expected: '2'

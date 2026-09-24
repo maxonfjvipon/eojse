@@ -1,0 +1,8 @@
+program: |
+  # Bare $ bound to a name, then navigated through.
+  [] > program
+    [x] > foo
+      $ > self
+      self.x > @
+    foo 42 > @
+expected: '42'

@@ -4,7 +4,7 @@
   <xsl:template match="object">
     <xsl:copy>
       <xsl:apply-templates select="@*"/>
-      <xsl:apply-templates select="formation|application|dispatch"/>
+      <xsl:apply-templates select="formation|application|dispatch|context"/>
     </xsl:copy>
   </xsl:template>
   <xsl:template match="node()|@*">
